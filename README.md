@@ -74,6 +74,12 @@ confirmation. Configuration creation uses create-only semantics and never
 overwrites an existing file. Ambiguous or invalid user configurations are
 opened for review instead of being rewritten automatically.
 
+Before showing first-run setup, the extension checks whether AeroSpace.app, the
+CLI, and exactly one configuration are already available. A complete setup is
+accepted automatically, including when the AeroSpace service is intentionally
+paused or stopped. Opening **Setup & Repair** later shows a read-only health
+summary; re-entering the full wizard requires a separate confirmation.
+
 AeroSpace itself needs macOS Accessibility permission to manage windows. This
 extension does not request additional system permissions.
 

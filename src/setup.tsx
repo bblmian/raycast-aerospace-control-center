@@ -34,6 +34,12 @@ type SetupSnapshot = {
   configPaths: string[];
 };
 
+export type SetupReadiness = {
+  required: boolean;
+  reasons: string[];
+  snapshot: SetupSnapshot;
+};
+
 type SetupStep = {
   id: string;
   title: string;
@@ -49,6 +55,25 @@ async function inspectSetup(): Promise<SetupSnapshot> {
     existingConfigPaths(),
   ]);
   return { installation, brewPath, configPaths };
+}
+
+export async function checkSetupReadiness(): Promise<SetupReadiness> {
+  const snapshot = await inspectSetup();
+  const { installation, configPaths } = snapshot;
+  const reasons: string[] = [];
+  if (!installation.appPath) reasons.push("AeroSpace.app is not installed.");
+  if (!installation.binaryPath) reasons.push("The aerospace CLI is not available.");
+  if (configPaths.length === 0) reasons.push("No custom AeroSpace configuration was found.");
+  if (configPaths.length > 1)
+    reasons.push("Multiple AeroSpace configurations create an ambiguous setup.");
+  if (
+    installation.clientVersion &&
+    installation.serverVersion &&
+    installation.clientVersion !== installation.serverVersion
+  ) {
+    reasons.push("The AeroSpace CLI and running app versions do not match.");
+  }
+  return { required: reasons.length > 0, reasons, snapshot };
 }
 
 function statusAppearance(status: SetupStep["status"]) {
@@ -74,6 +99,94 @@ function nextStepAction(steps: SetupStep[], index: number, setSelectedId: (id: s
       onAction={() => setSelectedId(next.id)}
     />
   ) : null;
+}
+
+export function SetupGate({ onExit = popToRoot }: { onExit?: () => void }) {
+  const [readiness, setReadiness] = useState<SetupReadiness | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [forceWizard, setForceWizard] = useState(false);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const result = await checkSetupReadiness();
+      setReadiness(result);
+      if (!result.required) {
+        await LocalStorage.setItem(SETUP_COMPLETE_KEY, "true");
+      }
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Setup Check Failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  if (loading || !readiness) {
+    return <List isLoading navigationTitle="AeroSpace Setup & Repair" />;
+  }
+  if (readiness.required || forceWizard) {
+    return <SetupWizard onExit={onExit} />;
+  }
+
+  const { installation, configPaths } = readiness.snapshot;
+  return (
+    <List
+      navigationTitle="AeroSpace Setup & Repair"
+      isShowingDetail
+      searchBarPlaceholder="AeroSpace is already configured"
+    >
+      <List.Section title="Setup Status" subtitle="No initialization required">
+        <List.Item
+          icon={coloredIcon(Icon.CheckCircle, PALETTE.green)}
+          title="Setup Already Complete"
+          subtitle={`${installation.clientVersion || "AeroSpace"} · Configuration and CLI detected`}
+          accessories={[{ tag: { value: "Ready", color: PALETTE.green } }]}
+          detail={
+            <List.Item.Detail
+              markdown={`## No Initialization Required\n\nAeroSpace is already installed and configured. Opening this command never reinstalls or rewrites a working setup.\n\n- **CLI:** \`${installation.binaryPath}\`\n- **Application:** \`${installation.appPath}\`\n- **Configuration:** \`${configPaths[0]}\`\n- **Service:** ${installation.state}\n- **Version:** ${installation.clientVersion || "Unknown"}`}
+            />
+          }
+          actions={
+            <ActionPanel>
+              <Action title="Return to Control Center" icon={Icon.ArrowLeft} onAction={onExit} />
+              <Action
+                title="Run Full Setup Again…"
+                icon={Icon.WrenchScrewdriver}
+                onAction={async () => {
+                  const confirmed = await confirmAlert({
+                    title: "Run the setup wizard again?",
+                    message:
+                      "Your current setup is healthy. The wizard will inspect each step, but working components will not be reinstalled or overwritten.",
+                    primaryAction: { title: "Run Setup Wizard" },
+                  });
+                  if (confirmed) setForceWizard(true);
+                }}
+              />
+              <Action
+                title="Refresh Health Check"
+                icon={Icon.RotateClockwise}
+                shortcut={Keyboard.Shortcut.Common.Refresh}
+                onAction={refresh}
+              />
+              <Action
+                title="Open Extension Preferences"
+                icon={Icon.Gear}
+                onAction={openExtensionPreferences}
+              />
+            </ActionPanel>
+          }
+        />
+      </List.Section>
+    </List>
+  );
 }
 
 export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
@@ -122,19 +235,20 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
       Boolean(installation.clientVersion) &&
       Boolean(installation.serverVersion) &&
       installation.clientVersion === installation.serverVersion;
-    const completedChecks = [
-      installed,
-      configPaths.length === 1,
-      serviceReady,
-      versionsMatch,
-    ].filter(Boolean).length;
+    const versionsCompatible =
+      !installation.clientVersion ||
+      !installation.serverVersion ||
+      installation.clientVersion === installation.serverVersion;
+    const completedChecks = [installed, configPaths.length === 1, versionsCompatible].filter(
+      Boolean,
+    ).length;
 
     return [
       {
         id: "welcome",
         title: "Welcome",
-        subtitle: `${completedChecks} of 4 automatic checks ready`,
-        status: completedChecks === 4 ? "ready" : "action",
+        subtitle: `${completedChecks} of 3 initialization requirements ready`,
+        status: completedChecks === 3 ? "ready" : "action",
         markdown:
           "## Guided Setup\n\nUse **Return** for the recommended action and **⌘ Return** to move to the next step.\n\nNothing is installed or changed without confirmation.",
       },
@@ -193,8 +307,12 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
           ? `Client and app match · ${installation.clientVersion}`
           : installation.clientVersion && installation.serverVersion
             ? `Client ${installation.clientVersion} · App ${installation.serverVersion}`
-            : "Start AeroSpace to compare client and app versions",
-        status: versionsMatch ? "ready" : serviceReady ? "warning" : "action",
+            : "App is not running; versions will be compared when available",
+        status: versionsMatch
+          ? "ready"
+          : installation.clientVersion && installation.serverVersion
+            ? "warning"
+            : "manual",
         markdown: `## Compatibility\n\n- CLI version: **${installation.clientVersion || "Unknown"}**\n- App version: **${installation.serverVersion || "Not running"}**\n\n${
           versionsMatch
             ? "The CLI and running application use the same version."
@@ -213,13 +331,13 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
         id: "finish",
         title: "Finish Setup",
         subtitle:
-          completedChecks === 4
-            ? "All automatic checks passed"
-            : `${4 - completedChecks} automatic check${4 - completedChecks === 1 ? "" : "s"} remaining`,
-        status: completedChecks === 4 ? "ready" : "action",
+          completedChecks === 3
+            ? "Installation requirements are complete"
+            : `${3 - completedChecks} requirement${3 - completedChecks === 1 ? "" : "s"} remaining`,
+        status: completedChecks === 3 ? "ready" : "action",
         markdown:
-          completedChecks === 4
-            ? "## Ready to Go\n\nAeroSpace, its CLI, configuration, service, and versions are ready. Finish setup to open the Control Center."
+          completedChecks === 3
+            ? "## Ready to Go\n\nAeroSpace, its CLI, and a single configuration are ready. A paused or stopped service does not force initialization; it can be started later from the Control Center."
             : "## Almost There\n\nReturn to the earlier steps marked **Action Needed** or **Review**, complete them, then refresh.",
       },
     ];
@@ -245,9 +363,9 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
         snapshot.installation.binaryPath &&
         snapshot.installation.appPath &&
         snapshot.configPaths.length === 1 &&
-        snapshot.installation.state === "enabled" &&
-        snapshot.installation.clientVersion &&
-        snapshot.installation.clientVersion === snapshot.installation.serverVersion,
+        (!snapshot.installation.clientVersion ||
+          !snapshot.installation.serverVersion ||
+          snapshot.installation.clientVersion === snapshot.installation.serverVersion),
       )
     : false;
 
@@ -432,5 +550,5 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
 }
 
 export default function SetupCommand() {
-  return <SetupWizard />;
+  return <SetupGate />;
 }

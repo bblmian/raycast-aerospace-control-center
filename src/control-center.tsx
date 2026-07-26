@@ -42,7 +42,7 @@ import {
 } from "./utils/aerospace";
 import { readWindowRule, saveWindowRule } from "./utils/rules";
 import { coloredIcon, PALETTE } from "./utils/theme";
-import { SETUP_COMPLETE_KEY, SetupWizard } from "./setup";
+import { SETUP_COMPLETE_KEY, SetupGate, checkSetupReadiness } from "./setup";
 
 async function run(
   title: string,
@@ -1216,9 +1216,24 @@ export default function ControlCenter() {
   };
   useEffect(() => {
     refresh();
-    LocalStorage.getItem<string>(SETUP_COMPLETE_KEY)
-      .then((value) => setSetupMode(value === "true" ? "hidden" : "show"))
-      .catch(() => setSetupMode("show"));
+    const checkInitialSetup = async () => {
+      try {
+        if ((await LocalStorage.getItem<string>(SETUP_COMPLETE_KEY)) === "true") {
+          setSetupMode("hidden");
+          return;
+        }
+        const readiness = await checkSetupReadiness();
+        if (readiness.required) {
+          setSetupMode("show");
+        } else {
+          await LocalStorage.setItem(SETUP_COMPLETE_KEY, "true");
+          setSetupMode("hidden");
+        }
+      } catch {
+        setSetupMode("show");
+      }
+    };
+    checkInitialSetup();
   }, []);
 
   const serviceAction =
@@ -1243,7 +1258,7 @@ export default function ControlCenter() {
     return <List isLoading navigationTitle="AeroSpace Control Center" />;
   }
   if (setupMode === "show") {
-    return <SetupWizard onExit={() => setSetupMode("hidden")} />;
+    return <SetupGate onExit={() => setSetupMode("hidden")} />;
   }
 
   return (
@@ -1414,7 +1429,7 @@ export default function ControlCenter() {
               <Action
                 title="Open Setup & Repair"
                 icon={Icon.WrenchScrewdriver}
-                onAction={() => push(<SetupWizard onExit={pop} />)}
+                onAction={() => push(<SetupGate onExit={pop} />)}
               />
             </ActionPanel>
           }
