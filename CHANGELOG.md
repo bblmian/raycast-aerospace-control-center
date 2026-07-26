@@ -10,6 +10,7 @@
 - Added recommended and original starter profiles, including floating rules for common chat apps.
 - Added adaptive detail layouts, compact icon accessories, and low-saturation visual hierarchy.
 - Added fixed eight-column, keyboard-navigable Grid layouts with neon icon accents.
+- Refined Grid icons with a consistent 40% visual scale, optical centering, and lighter line weight.
 - Added window, workspace, monitor, layout, and service controls.
 - Added persistent application rules with automatic configuration backups.
 - Added dedicated hotkey-friendly commands and menu bar controls.

@@ -25,3 +25,28 @@ export const NEON = {
 export function coloredIcon(source: Icon, tintColor: string) {
   return { source, tintColor };
 }
+
+export type CompactGridIcon =
+  | "bolt"
+  | "code"
+  | "focus"
+  | "heartbeat"
+  | "layout"
+  | "list"
+  | "maintenance"
+  | "menu-bar"
+  | "monitor"
+  | "power"
+  | "reload"
+  | "resize"
+  | "settings"
+  | "status"
+  | "status-ring"
+  | "terminal"
+  | "tools"
+  | "window"
+  | "workspaces";
+
+export function compactGridIcon(source: CompactGridIcon, tintColor: string) {
+  return { source: `grid-icons/${source}.svg`, tintColor };
+}
