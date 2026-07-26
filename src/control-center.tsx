@@ -46,7 +46,11 @@ type WindowInfo = {
   workspace?: string;
   "monitor-id"?: number;
   "monitor-name"?: string;
+  "window-layout"?: string;
 };
+
+const WINDOW_LIST_FORMAT =
+  "%{window-id} %{app-name} %{app-bundle-id} %{window-title} %{workspace} %{monitor-id} %{monitor-name} %{window-layout}";
 
 type MonitorInfo = {
   "monitor-id": number;
@@ -243,7 +247,16 @@ export function WindowsView() {
   const refresh = () => {
     setLoading(true);
     setLoadError("");
-    Promise.all([jsonCommand<WindowInfo[]>(["list-windows", "--all", "--json"]), getApplications()])
+    Promise.all([
+      jsonCommand<WindowInfo[]>([
+        "list-windows",
+        "--all",
+        "--json",
+        "--format",
+        WINDOW_LIST_FORMAT,
+      ]),
+      getApplications(),
+    ])
       .then(([windowItems, applications]) => {
         setWindows(windowItems);
         setAppPaths(
@@ -366,6 +379,10 @@ export function WindowsView() {
                     title="Bundle ID"
                     text={window["app-bundle-id"]}
                   />
+                  <List.Item.Detail.Metadata.Label
+                    title="Layout"
+                    text={window["window-layout"] || "Unknown"}
+                  />
                 </List.Item.Detail.Metadata>
               }
             />
@@ -388,16 +405,19 @@ export function WindowsView() {
                 onAction={() => push(<PersistentRuleForm window={window} />)}
               />
               <ActionPanel.Section title="Layout">
-                <CommandAction
-                  title="Set Floating"
-                  args={["layout", "floating", "--window-id", String(window["window-id"])]}
-                  onDone={refresh}
-                />
-                <CommandAction
-                  title="Set Tiling"
-                  args={["layout", "tiling", "--window-id", String(window["window-id"])]}
-                  onDone={refresh}
-                />
+                {window["window-layout"] === "floating" ? (
+                  <CommandAction
+                    title="Set Tiling"
+                    args={["layout", "tiling", "--window-id", String(window["window-id"])]}
+                    onDone={refresh}
+                  />
+                ) : (
+                  <CommandAction
+                    title="Set Floating"
+                    args={["layout", "floating", "--window-id", String(window["window-id"])]}
+                    onDone={refresh}
+                  />
+                )}
                 <CommandAction
                   title="Toggle AeroSpace Fullscreen"
                   args={["fullscreen", "--window-id", String(window["window-id"])]}

@@ -327,6 +327,9 @@ export function errorMessage(error: unknown): string {
   if (error && typeof error === "object") {
     const candidate = error as { stderr?: string; message?: string };
     if (candidate.stderr?.trim()) return candidate.stderr.trim();
+    if (candidate.message?.startsWith("Command failed:")) {
+      return "AeroSpace rejected the command without an explanation. The selected window may have changed or closed; refresh the list and try again.";
+    }
     if (candidate.message) return candidate.message;
   }
   return String(error);
