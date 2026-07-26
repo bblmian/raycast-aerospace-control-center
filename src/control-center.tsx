@@ -225,7 +225,6 @@ export function WindowsView() {
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [showDetails, setShowDetails] = useState(false);
   const { push } = useNavigation();
   const refresh = () => {
     setLoading(true);
@@ -260,7 +259,7 @@ export function WindowsView() {
     <List
       navigationTitle="AeroSpace Windows"
       isLoading={loading}
-      isShowingDetail={showDetails}
+      isShowingDetail
       filtering={{ keepSectionOrder: true }}
       searchBarPlaceholder="Search title, application, or bundle ID…"
       searchBarAccessory={
@@ -328,24 +327,6 @@ export function WindowsView() {
             window["monitor-name"],
             window["window-layout"],
           ]}
-          accessories={[
-            {
-              text: window.workspace,
-              icon: coloredIcon(Icon.Window, PALETTE.indigo),
-              tooltip: `Workspace ${window.workspace}`,
-            },
-            {
-              icon: coloredIcon(
-                Icon.AppWindow,
-                window["window-layout"] === "floating" ? PALETTE.coral : PALETTE.blue,
-              ),
-              tooltip: layoutLabel(window["window-layout"]),
-            },
-            {
-              icon: coloredIcon(Icon.Desktop, PALETTE.teal),
-              tooltip: window["monitor-name"],
-            },
-          ]}
           detail={
             <List.Item.Detail
               markdown={`## ${window["app-name"]}\n\n> ${window["window-title"] || "Untitled Window"}\n\n### At a Glance\n\n| | |\n| :-- | :-- |\n| ▦ **Workspace** | ${markdownCell(window.workspace)} |\n| ▰ **Display** | ${markdownCell(window["monitor-name"])} |\n| ◇ **Layout** | ${markdownCell(layoutLabel(window["window-layout"]))} |\n\n### Quick Actions\n\n| | |\n| :-- | :-- |\n| **↵** | Focus this window |\n| **⌘ K** | Move, resize, change layout, or close |`}
@@ -367,12 +348,6 @@ export function WindowsView() {
                 title="Manage Persistent Application Rule…"
                 icon={Icon.Gear}
                 onAction={() => push(<PersistentRuleForm window={window} />)}
-              />
-              <Action
-                title={showDetails ? "Hide Window Details" : "Show Window Details"}
-                icon={Icon.Eye}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
-                onAction={() => setShowDetails((visible) => !visible)}
               />
               <ActionPanel.Section title="Layout">
                 {window["window-layout"] === "floating" ? (
