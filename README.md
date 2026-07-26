@@ -3,6 +3,8 @@
 A comprehensive Raycast interface for the
 [AeroSpace](https://github.com/nikitabobko/AeroSpace) tiling window manager.
 
+![AeroSpace Control Center](media/control-center.png)
+
 ## Requirements
 
 - macOS
