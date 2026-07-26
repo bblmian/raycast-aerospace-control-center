@@ -148,7 +148,12 @@ export function SetupGate({ onExit = popToRoot }: { onExit?: () => void }) {
           icon={coloredIcon(Icon.CheckCircle, PALETTE.green)}
           title="Setup Already Complete"
           subtitle={`${installation.clientVersion || "AeroSpace"} · Configuration and CLI detected`}
-          accessories={[{ tag: { value: "Ready", color: PALETTE.green } }]}
+          accessories={[
+            {
+              text: "Ready",
+              icon: coloredIcon(Icon.CheckCircle, PALETTE.green),
+            },
+          ]}
           detail={
             <List.Item.Detail
               markdown={`## No Initialization Required\n\nAeroSpace is already installed and configured. Opening this command never reinstalls or rewrites a working setup.\n\n- **CLI:** \`${installation.binaryPath}\`\n- **Application:** \`${installation.appPath}\`\n- **Configuration:** \`${configPaths[0]}\`\n- **Service:** ${installation.state}\n- **Version:** ${installation.clientVersion || "Unknown"}`}
@@ -395,7 +400,12 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
               icon={coloredIcon(appearance.icon, appearance.color)}
               title={`${index + 1}. ${step.title}`}
               subtitle={step.subtitle}
-              accessories={[{ tag: { value: appearance.label, color: appearance.color } }]}
+              accessories={[
+                {
+                  text: appearance.label,
+                  icon: coloredIcon(appearance.icon, appearance.color),
+                },
+              ]}
               detail={<List.Item.Detail markdown={step.markdown} />}
               actions={
                 <ActionPanel>

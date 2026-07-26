@@ -81,10 +81,12 @@ export default function BrowseShortcuts() {
                 subtitle={item.command !== item.description ? item.command : undefined}
                 accessories={[
                   {
-                    tag: {
-                      value: item.keyDisplay,
-                      color: item.mode === "main" ? PALETTE.blue : PALETTE.amber,
-                    },
+                    text: item.keyDisplay,
+                    icon: coloredIcon(
+                      Icon.CommandSymbol,
+                      item.mode === "main" ? PALETTE.blue : PALETTE.amber,
+                    ),
+                    tooltip: `${item.mode} mode shortcut`,
                   },
                 ]}
                 actions={

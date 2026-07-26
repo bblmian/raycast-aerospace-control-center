@@ -6,6 +6,7 @@
 - Added automatic detection for Homebrew and manual AeroSpace installations.
 - Added compatibility diagnostics for CLI, app, configuration, and versions.
 - Added guided first-run setup with user-confirmed Homebrew installation and safe config creation.
+- Added adaptive detail layouts, compact icon accessories, and low-saturation visual hierarchy.
 - Added window, workspace, monitor, layout, and service controls.
 - Added persistent application rules with automatic configuration backups.
 - Added dedicated hotkey-friendly commands and menu bar controls.

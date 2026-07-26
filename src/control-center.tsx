@@ -225,6 +225,7 @@ export function WindowsView() {
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
   const { push } = useNavigation();
   const refresh = () => {
     setLoading(true);
@@ -259,7 +260,7 @@ export function WindowsView() {
     <List
       navigationTitle="AeroSpace Windows"
       isLoading={loading}
-      isShowingDetail
+      isShowingDetail={showDetails}
       filtering={{ keepSectionOrder: true }}
       searchBarPlaceholder="Search title, application, or bundle ID…"
       searchBarAccessory={
@@ -329,56 +330,25 @@ export function WindowsView() {
           ]}
           accessories={[
             {
-              tag: {
-                value: `Workspace ${window.workspace}`,
-                color: PALETTE.indigo,
-              },
+              text: window.workspace,
+              icon: coloredIcon(Icon.Window, PALETTE.indigo),
+              tooltip: `Workspace ${window.workspace}`,
             },
             {
-              text: layoutLabel(window["window-layout"]),
               icon: coloredIcon(
                 Icon.AppWindow,
                 window["window-layout"] === "floating" ? PALETTE.coral : PALETTE.blue,
               ),
+              tooltip: layoutLabel(window["window-layout"]),
+            },
+            {
+              icon: coloredIcon(Icon.Desktop, PALETTE.teal),
+              tooltip: window["monitor-name"],
             },
           ]}
           detail={
             <List.Item.Detail
-              markdown={`## ${window["window-title"] || "Untitled Window"}\n\n${window["app-name"]}`}
-              metadata={
-                <List.Item.Detail.Metadata>
-                  <List.Item.Detail.Metadata.Label title="Application" text={window["app-name"]} />
-                  <List.Item.Detail.Metadata.Label
-                    title="Workspace"
-                    text={window.workspace || "Unknown"}
-                    icon={coloredIcon(Icon.Window, PALETTE.indigo)}
-                  />
-                  {window["monitor-name"] ? (
-                    <List.Item.Detail.Metadata.Label
-                      title="Monitor"
-                      text={window["monitor-name"]}
-                      icon={coloredIcon(Icon.Desktop, PALETTE.teal)}
-                    />
-                  ) : null}
-                  <List.Item.Detail.Metadata.Separator />
-                  <List.Item.Detail.Metadata.Label
-                    title="Window ID"
-                    text={String(window["window-id"])}
-                  />
-                  <List.Item.Detail.Metadata.Label
-                    title="Bundle ID"
-                    text={window["app-bundle-id"]}
-                  />
-                  <List.Item.Detail.Metadata.Label
-                    title="Layout"
-                    text={window["window-layout"] || "Unknown"}
-                    icon={coloredIcon(
-                      Icon.AppWindow,
-                      window["window-layout"] === "floating" ? PALETTE.coral : PALETTE.blue,
-                    )}
-                  />
-                </List.Item.Detail.Metadata>
-              }
+              markdown={`## ${window["app-name"]}\n\n> ${window["window-title"] || "Untitled Window"}\n\n### At a Glance\n\n| | |\n| :-- | :-- |\n| ▦ **Workspace** | ${markdownCell(window.workspace)} |\n| ▰ **Display** | ${markdownCell(window["monitor-name"])} |\n| ◇ **Layout** | ${markdownCell(layoutLabel(window["window-layout"]))} |\n\n### Quick Actions\n\n| | |\n| :-- | :-- |\n| **↵** | Focus this window |\n| **⌘ K** | Move, resize, change layout, or close |`}
             />
           }
           actions={
@@ -397,6 +367,12 @@ export function WindowsView() {
                 title="Manage Persistent Application Rule…"
                 icon={Icon.Gear}
                 onAction={() => push(<PersistentRuleForm window={window} />)}
+              />
+              <Action
+                title={showDetails ? "Hide Window Details" : "Show Window Details"}
+                icon={Icon.Eye}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
+                onAction={() => setShowDetails((visible) => !visible)}
               />
               <ActionPanel.Section title="Layout">
                 {window["window-layout"] === "floating" ? (
@@ -432,6 +408,10 @@ export function WindowsView() {
                   icon={Icon.XMarkCircle}
                   destructive
                   onDone={refresh}
+                />
+                <Action.CopyToClipboard
+                  title="Copy Window ID"
+                  content={String(window["window-id"])}
                 />
                 <Action.CopyToClipboard title="Copy Bundle ID" content={window["app-bundle-id"]} />
                 <Action
@@ -510,7 +490,7 @@ function layoutLabel(layout: string): string {
 
 function workspaceMarkdown(item: WorkspaceSummary): string {
   if (item.windows.length === 0) {
-    return `## Workspace ${item.workspace}\n\nThis workspace is empty and ready to use.`;
+    return `## Workspace ${item.workspace}\n\n> ${item["monitor-name"]}\n\n### Ready for Windows\n\nThis visible workspace is currently empty.\n\n| | |\n| :-- | :-- |\n| **↵** | Switch to this workspace |\n| **⌘ K** | Move a window here or manage its layout |`;
   }
 
   const rows = item.windows
@@ -519,7 +499,7 @@ function workspaceMarkdown(item: WorkspaceSummary): string {
         `| ${markdownCell(window["app-name"])} | ${markdownCell(window["window-title"])} | ${markdownCell(layoutLabel(window["window-layout"]))} |`,
     )
     .join("\n");
-  return `## Windows\n\n| Application | Window | Layout |\n| :-- | :-- | :-- |\n${rows}`;
+  return `## Workspace ${item.workspace}\n\n> ${item["monitor-name"]} · ${item.windows.length} window${item.windows.length === 1 ? "" : "s"} · ${item.appNames.length} app${item.appNames.length === 1 ? "" : "s"}\n\n### Windows\n\n| Application | Window | Layout |\n| :-- | :-- | :-- |\n${rows}\n\n### Quick Actions\n\n| | |\n| :-- | :-- |\n| **↵** | Switch to this workspace |\n| **⌘ K** | Move, summon, balance, or flatten |`;
 }
 
 function appSummary(names: string[]): string {
@@ -654,9 +634,19 @@ export function WorkspacesView() {
             ]}
             accessories={[
               ...(item["workspace-is-focused"]
-                ? [{ tag: { value: "Focused", color: PALETTE.green } }]
+                ? [
+                    {
+                      text: "Focused",
+                      icon: coloredIcon(Icon.Dot, PALETTE.green),
+                    },
+                  ]
                 : item["workspace-is-visible"]
-                  ? [{ tag: { value: "Visible", color: PALETTE.blue } }]
+                  ? [
+                      {
+                        text: "Visible",
+                        icon: coloredIcon(Icon.Eye, PALETTE.blue),
+                      },
+                    ]
                   : []),
               { text: `${item.windows.length} window${item.windows.length === 1 ? "" : "s"}` },
               { text: `${item.appNames.length} app${item.appNames.length === 1 ? "" : "s"}` },
@@ -768,7 +758,7 @@ function monitorMarkdown(item: MonitorSummary): string {
         } |`,
     )
     .join("\n");
-  return `## Workspaces\n\n| Workspace | Windows | Apps | State |\n| :-- | --: | --: | :-- |\n${rows}`;
+  return `## ${item["monitor-name"]}\n\n> ${item["monitor-is-main"] ? "Main display" : "Secondary display"} · ${item.workspaces.length} workspace${item.workspaces.length === 1 ? "" : "s"} · ${item.windows.length} window${item.windows.length === 1 ? "" : "s"}\n\n### Workspaces\n\n| Workspace | Windows | Apps | State |\n| :-- | --: | --: | :-- |\n${rows}\n\n### Quick Actions\n\n| | |\n| :-- | :-- |\n| **↵** | Focus this display |\n| **⌘ K** | Move a window or workspace here |`;
 }
 
 function MonitorsView() {
@@ -824,7 +814,9 @@ function MonitorsView() {
             ...item.workspaces.map((workspace) => workspace.workspace),
           ]}
           accessories={[
-            ...(item["monitor-is-main"] ? [{ tag: { value: "Main", color: PALETTE.green } }] : []),
+            ...(item["monitor-is-main"]
+              ? [{ text: "Main", icon: coloredIcon(Icon.CheckCircle, PALETTE.green) }]
+              : []),
             { text: `${item.workspaces.length} workspaces` },
             { text: `${item.windows.length} windows` },
           ]}
@@ -1284,10 +1276,12 @@ export default function ControlCenter() {
           subtitle={serviceSubtitle}
           accessories={[
             {
-              tag: {
-                value: configPath ? "Config Ready" : "Built-in Defaults",
-                color: configPath ? PALETTE.teal : PALETTE.secondary,
-              },
+              text: configPath ? "Config" : "Defaults",
+              icon: coloredIcon(
+                configPath ? Icon.CheckCircle : Icon.Document,
+                configPath ? PALETTE.teal : PALETTE.secondary,
+              ),
+              tooltip: configPath || "Using AeroSpace built-in defaults",
             },
           ]}
           actions={
