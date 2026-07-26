@@ -48,5 +48,5 @@ export type CompactGridIcon =
   | "workspaces";
 
 export function compactGridIcon(source: CompactGridIcon, tintColor: string) {
-  return { source: `grid-icons/${source}.svg`, tintColor };
+  return { source: `grid-icons/${source}.png`, tintColor };
 }
