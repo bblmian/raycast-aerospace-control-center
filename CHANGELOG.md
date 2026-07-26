@@ -11,6 +11,7 @@
 - Added adaptive detail layouts, compact icon accessories, and low-saturation visual hierarchy.
 - Added fixed eight-column, keyboard-navigable Grid layouts with neon icon accents.
 - Refined Grid icons with compact raster canvases, preserved padding, optical centering, and lighter line weight.
+- Baked neon colors into centered image assets to match Raycast's native image-grid alignment.
 - Added window, workspace, monitor, layout, and service controls.
 - Added persistent application rules with automatic configuration backups.
 - Added dedicated hotkey-friendly commands and menu bar controls.

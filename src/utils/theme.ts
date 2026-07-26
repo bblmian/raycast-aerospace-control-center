@@ -47,6 +47,8 @@ export type CompactGridIcon =
   | "window"
   | "workspaces";
 
-export function compactGridIcon(source: CompactGridIcon, tintColor: string) {
-  return { source: `grid-icons/${source}.png`, tintColor };
+export type CompactGridColor = keyof typeof NEON;
+
+export function compactGridIcon(source: CompactGridIcon, color: CompactGridColor) {
+  return { source: `grid-icons/${source}-${color}.png` };
 }

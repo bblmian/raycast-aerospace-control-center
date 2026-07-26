@@ -42,7 +42,13 @@ import {
   toggleAerospace,
 } from "./utils/aerospace";
 import { readWindowRule, saveWindowRule } from "./utils/rules";
-import { coloredIcon, compactGridIcon, CompactGridIcon, NEON, PALETTE } from "./utils/theme";
+import {
+  coloredIcon,
+  compactGridIcon,
+  CompactGridColor,
+  CompactGridIcon,
+  PALETTE,
+} from "./utils/theme";
 import { SETUP_COMPLETE_KEY, SetupGate, checkSetupReadiness } from "./setup";
 
 async function run(
@@ -1025,12 +1031,12 @@ function QuickCommandsView() {
     (result[item.section] ||= []).push(item);
     return result;
   }, {});
-  const sectionColors: Record<string, string> = {
-    "Focus and Move": NEON.blue,
-    Layout: NEON.cyan,
-    "Size and Window": NEON.orange,
-    Workspace: NEON.purple,
-    Maintenance: NEON.green,
+  const sectionColors: Record<string, CompactGridColor> = {
+    "Focus and Move": "blue",
+    Layout: "cyan",
+    "Size and Window": "orange",
+    Workspace: "purple",
+    Maintenance: "green",
   };
   const sectionIcons: Record<string, CompactGridIcon> = {
     "Focus and Move": "focus",
@@ -1060,7 +1066,7 @@ function QuickCommandsView() {
               content={{
                 value: compactGridIcon(
                   sectionIcons[section] || "bolt",
-                  sectionColors[section] || PALETTE.secondary,
+                  sectionColors[section] || "blue",
                 ),
                 tooltip: `${item.title} — aerospace ${item.subtitle}`,
               }}
@@ -1264,7 +1270,7 @@ export default function ControlCenter() {
       <Grid.Section title="Browse and Control" subtitle="Live window management" columns={8}>
         <Grid.Item
           content={{
-            value: compactGridIcon("window", NEON.blue),
+            value: compactGridIcon("window", "blue"),
             tooltip: "Focus, move, resize, change layout, minimize, or close windows",
           }}
           title="Windows"
@@ -1276,7 +1282,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("workspaces", NEON.purple),
+            value: compactGridIcon("workspaces", "purple"),
             tooltip: "See window and app counts, switch workspaces, summon, balance, or flatten",
           }}
           title="Workspaces"
@@ -1288,7 +1294,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("monitor", NEON.cyan),
+            value: compactGridIcon("monitor", "cyan"),
             tooltip: "Focus displays or move windows and workspaces between monitors",
           }}
           title="Monitors"
@@ -1300,7 +1306,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("bolt", NEON.yellow),
+            value: compactGridIcon("bolt", "yellow"),
             tooltip: "Focus, move, split, resize, and maintain window layouts",
           }}
           title="Quick Actions"
@@ -1318,12 +1324,12 @@ export default function ControlCenter() {
             value: compactGridIcon(
               state === "enabled" ? "status" : "status-ring",
               state === "enabled"
-                ? NEON.green
+                ? "green"
                 : state === "disabled"
-                  ? NEON.orange
+                  ? "orange"
                   : state === "not-installed"
-                    ? NEON.red
-                    : NEON.blue,
+                    ? "red"
+                    : "blue",
             ),
             tooltip: `${serviceSubtitle}. ${
               configPath ? "Configuration detected." : "Using built-in defaults."
@@ -1360,7 +1366,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("reload", NEON.blue),
+            value: compactGridIcon("reload", "blue"),
             tooltip: "Apply changes from the active aerospace.toml configuration",
           }}
           title="Reload Config"
@@ -1375,7 +1381,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("power", NEON.pink),
+            value: compactGridIcon("power", "pink"),
             tooltip: "Stop AeroSpace and automatic window management",
           }}
           title="Quit AeroSpace"
@@ -1406,7 +1412,7 @@ export default function ControlCenter() {
       <Grid.Section title="Tools" subtitle="Diagnostics and power features" columns={8}>
         <Grid.Item
           content={{
-            value: compactGridIcon("tools", NEON.cyan),
+            value: compactGridIcon("tools", "cyan"),
             tooltip: "Check installation health and open the guided repair workflow",
           }}
           title="Setup & Repair"
@@ -1422,7 +1428,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("heartbeat", NEON.green),
+            value: compactGridIcon("heartbeat", "green"),
             tooltip: "Review detected paths, client and server versions, configuration, and issues",
           }}
           title="Compatibility"
@@ -1434,7 +1440,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("menu-bar", NEON.purple),
+            value: compactGridIcon("menu-bar", "purple"),
             tooltip: "Enable persistent status, workspaces, and controls in the macOS menu bar",
           }}
           title="Menu Bar"
@@ -1455,7 +1461,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("terminal", NEON.yellow),
+            value: compactGridIcon("terminal", "yellow"),
             tooltip: `Run any of ${ALL_SUBCOMMANDS.length} detected AeroSpace subcommands`,
           }}
           title="Any Command"
@@ -1467,7 +1473,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("list", NEON.blue),
+            value: compactGridIcon("list", "blue"),
             tooltip: "Inspect applications currently managed by AeroSpace",
           }}
           title="Applications"
@@ -1484,7 +1490,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("settings", NEON.pink),
+            value: compactGridIcon("settings", "pink"),
             tooltip: "Inspect active and configured keyboard binding modes",
           }}
           title="Binding Modes"
@@ -1499,7 +1505,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("code", NEON.cyan),
+            value: compactGridIcon("code", "cyan"),
             tooltip: "Inspect environment variables available to AeroSpace commands",
           }}
           title="Environment"
