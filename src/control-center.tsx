@@ -22,6 +22,7 @@ import { useEffect, useState } from "react";
 import {
   ALL_SUBCOMMANDS,
   ServiceState,
+  WindowInfo,
   WorkspaceInfo,
   aerospace,
   diagnoseInstallation,
@@ -29,6 +30,8 @@ import {
   getServiceSummary,
   jsonCommand,
   listAvailableSubcommands,
+  listWindows,
+  listWorkspaces,
   quitAerospace,
   reloadAerospace,
   resolveConfigPath,
@@ -37,20 +40,6 @@ import {
   toggleAerospace,
 } from "./utils/aerospace";
 import { readWindowRule, saveWindowRule } from "./utils/rules";
-
-type WindowInfo = {
-  "window-id": number;
-  "app-name": string;
-  "app-bundle-id": string;
-  "window-title": string;
-  workspace?: string;
-  "monitor-id"?: number;
-  "monitor-name"?: string;
-  "window-layout"?: string;
-};
-
-const WINDOW_LIST_FORMAT =
-  "%{window-id} %{app-name} %{app-bundle-id} %{window-title} %{workspace} %{monitor-id} %{monitor-name} %{window-layout}";
 
 type MonitorInfo = {
   "monitor-id": number;
@@ -128,7 +117,7 @@ function MoveToWorkspaceForm({ windowId }: { windowId?: number }) {
   const { pop } = useNavigation();
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   useEffect(() => {
-    jsonCommand<WorkspaceInfo[]>(["list-workspaces", "--all", "--json"])
+    listWorkspaces()
       .then(setWorkspaces)
       .catch(() => setWorkspaces([]));
   }, []);
@@ -171,10 +160,7 @@ function PersistentRuleForm({ window }: { window: WindowInfo }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      jsonCommand<WorkspaceInfo[]>(["list-workspaces", "--all", "--json"]),
-      readWindowRule(window["app-bundle-id"]),
-    ])
+    Promise.all([listWorkspaces(), readWindowRule(window["app-bundle-id"])])
       .then(([items, state]) => {
         setWorkspaces(items);
         setFloating(state.floating);
@@ -247,16 +233,7 @@ export function WindowsView() {
   const refresh = () => {
     setLoading(true);
     setLoadError("");
-    Promise.all([
-      jsonCommand<WindowInfo[]>([
-        "list-windows",
-        "--all",
-        "--json",
-        "--format",
-        WINDOW_LIST_FORMAT,
-      ]),
-      getApplications(),
-    ])
+    Promise.all([listWindows(), getApplications()])
       .then(([windowItems, applications]) => {
         setWindows(windowItems);
         setAppPaths(
@@ -455,25 +432,160 @@ export function WindowsView() {
   );
 }
 
+type WorkspaceSummary = WorkspaceInfo & {
+  windows: WindowInfo[];
+  appNames: string[];
+};
+
+function workspaceActions(item: WorkspaceInfo, refresh?: () => void) {
+  return (
+    <ActionPanel>
+      <CommandAction
+        title="Switch to Workspace"
+        args={["workspace", item.workspace]}
+        onDone={popToRoot}
+      />
+      <CommandAction
+        title="Move Focused Window Here"
+        args={["move-node-to-workspace", item.workspace]}
+      />
+      <CommandAction
+        title="Summon Workspace to Focused Monitor"
+        args={["summon-workspace", item.workspace]}
+      />
+      <ActionPanel.Section>
+        <CommandAction
+          title="Balance Window Sizes"
+          args={["balance-sizes", "--workspace", item.workspace]}
+        />
+        <CommandAction
+          title="Flatten Workspace Tree"
+          args={["flatten-workspace-tree", "--workspace", item.workspace]}
+        />
+        {refresh ? (
+          <Action
+            title="Refresh Workspaces"
+            icon={Icon.RotateClockwise}
+            shortcut={Keyboard.Shortcut.Common.Refresh}
+            onAction={refresh}
+          />
+        ) : null}
+      </ActionPanel.Section>
+    </ActionPanel>
+  );
+}
+
+function shorten(value: string, maximum = 54): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maximum ? `${normalized.slice(0, maximum - 1)}…` : normalized;
+}
+
+function markdownCell(value: string): string {
+  return shorten(value || "Untitled").replace(/\|/g, "\\|");
+}
+
+function layoutLabel(layout: string): string {
+  return layout
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function workspaceMarkdown(item: WorkspaceSummary): string {
+  if (item.windows.length === 0) {
+    return `## Workspace ${item.workspace}\n\nThis workspace is empty and ready to use.`;
+  }
+
+  const rows = item.windows
+    .map(
+      (window) =>
+        `| ${markdownCell(window["app-name"])} | ${markdownCell(window["window-title"])} | ${markdownCell(layoutLabel(window["window-layout"]))} |`,
+    )
+    .join("\n");
+  return `## Windows\n\n| Application | Window | Layout |\n| :-- | :-- | :-- |\n${rows}`;
+}
+
+function appSummary(names: string[]): string {
+  const visible = names.slice(0, 3).join(" · ");
+  return names.length > 3 ? `${visible} …` : visible;
+}
+
+function emptyWorkspacesMarkdown(items: WorkspaceInfo[]): string {
+  const byMonitor = new Map<string, string[]>();
+  for (const item of items) {
+    const monitor = `${item["monitor-name"]} · ID ${item["monitor-id"]}`;
+    byMonitor.set(monitor, [...(byMonitor.get(monitor) || []), item.workspace]);
+  }
+  const rows = [...byMonitor.entries()]
+    .map(([monitor, workspaces]) => `| ${markdownCell(monitor)} | ${workspaces.join(" · ")} |`)
+    .join("\n");
+  return `## Empty Workspaces\n\n| Monitor | Workspaces |\n| :-- | :-- |\n${rows}`;
+}
+
+function EmptyWorkspacesView({ items }: { items: WorkspaceInfo[] }) {
+  return (
+    <List
+      navigationTitle="Empty Workspaces"
+      searchBarPlaceholder="Search empty workspaces or monitors…"
+    >
+      <List.Section title="Available" subtitle={`${items.length} workspaces`}>
+        {items.map((item) => (
+          <List.Item
+            key={`${item["monitor-id"]}-${item.workspace}`}
+            icon={Icon.Circle}
+            title={`Workspace ${item.workspace}`}
+            subtitle={item["monitor-name"]}
+            keywords={[item.workspace, item["monitor-name"], String(item["monitor-id"])]}
+            accessories={[{ text: `Monitor ${item["monitor-id"]}` }]}
+            actions={workspaceActions(item)}
+          />
+        ))}
+      </List.Section>
+    </List>
+  );
+}
+
 export function WorkspacesView() {
-  const [items, setItems] = useState<WorkspaceInfo[]>([]);
+  const [items, setItems] = useState<WorkspaceSummary[]>([]);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
+  const { push } = useNavigation();
   const refresh = () => {
     setLoading(true);
     setLoadError("");
-    jsonCommand<WorkspaceInfo[]>(["list-workspaces", "--all", "--json"])
-      .then(setItems)
+    Promise.all([listWorkspaces(), listWindows()])
+      .then(([workspaces, windows]) => {
+        setItems(
+          workspaces.map((workspace) => {
+            const workspaceWindows = windows.filter(
+              (window) => window.workspace === workspace.workspace,
+            );
+            const appNames = [...new Set(workspaceWindows.map((window) => window["app-name"]))];
+            return { ...workspace, windows: workspaceWindows, appNames };
+          }),
+        );
+      })
       .catch((error) => setLoadError(errorMessage(error)))
       .finally(() => setLoading(false));
   };
   useEffect(() => {
     refresh();
   }, []);
+
+  const populated = items.filter(
+    (item) =>
+      item.windows.length > 0 || item["workspace-is-focused"] || item["workspace-is-visible"],
+  );
+  const empty = items.filter(
+    (item) =>
+      item.windows.length === 0 && !item["workspace-is-focused"] && !item["workspace-is-visible"],
+  );
+
   return (
     <List
       navigationTitle="AeroSpace Workspaces"
       isLoading={loading}
+      isShowingDetail
       searchBarPlaceholder="Search workspaces or monitors…"
     >
       {!loading && items.length === 0 ? (
@@ -504,42 +616,104 @@ export function WorkspacesView() {
           }
         />
       ) : null}
-      {items.map((item) => (
-        <List.Item
-          key={`${item["monitor-id"]}-${item.workspace}`}
-          icon={item["workspace-is-focused"] ? Icon.Dot : Icon.Window}
-          title={`Workspace ${item.workspace}`}
-          subtitle={item["monitor-name"]}
-          keywords={[item.workspace, item["monitor-name"], String(item["monitor-id"])]}
-          accessories={[
-            ...(item["workspace-is-focused"]
-              ? [{ tag: { value: "Focused", color: Color.Green } }]
-              : []),
-            ...(item["workspace-is-visible"] ? [{ text: "Visible" }] : []),
-          ]}
-          actions={
-            <ActionPanel>
-              <CommandAction
-                title="Switch to Workspace"
-                args={["workspace", item.workspace]}
-                onDone={popToRoot}
+      <List.Section title="In Use" subtitle={`${populated.length} workspaces`}>
+        {populated.map((item) => (
+          <List.Item
+            key={`${item["monitor-id"]}-${item.workspace}`}
+            icon={item["workspace-is-focused"] ? Icon.Dot : Icon.Window}
+            title={`Workspace ${item.workspace}`}
+            subtitle={`${item["monitor-name"]} · ${
+              item.appNames.length > 0 ? appSummary(item.appNames) : "Visible · Empty"
+            }`}
+            keywords={[
+              item.workspace,
+              item["monitor-name"],
+              String(item["monitor-id"]),
+              ...item.appNames,
+              ...item.windows.map((window) => window["window-title"]),
+            ]}
+            accessories={[
+              ...(item["workspace-is-focused"]
+                ? [{ tag: { value: "Focused", color: Color.Green } }]
+                : item["workspace-is-visible"]
+                  ? [{ tag: { value: "Visible", color: Color.Blue } }]
+                  : []),
+              { text: `${item.windows.length} window${item.windows.length === 1 ? "" : "s"}` },
+              { text: `${item.appNames.length} app${item.appNames.length === 1 ? "" : "s"}` },
+            ]}
+            detail={
+              <List.Item.Detail
+                markdown={workspaceMarkdown(item)}
+                metadata={
+                  <List.Item.Detail.Metadata>
+                    <List.Item.Detail.Metadata.Label
+                      title="Workspace"
+                      text={item.workspace}
+                      icon={Icon.Window}
+                    />
+                    <List.Item.Detail.Metadata.Label
+                      title="Monitor"
+                      text={`${item["monitor-name"]} · ID ${item["monitor-id"]}`}
+                      icon={Icon.Desktop}
+                    />
+                    <List.Item.Detail.Metadata.Separator />
+                    <List.Item.Detail.Metadata.Label
+                      title="Windows"
+                      text={String(item.windows.length)}
+                    />
+                    <List.Item.Detail.Metadata.Label
+                      title="Applications"
+                      text={String(item.appNames.length)}
+                    />
+                    <List.Item.Detail.Metadata.Label
+                      title="State"
+                      text={
+                        item["workspace-is-focused"]
+                          ? "Focused"
+                          : item["workspace-is-visible"]
+                            ? "Visible"
+                            : "Inactive"
+                      }
+                    />
+                  </List.Item.Detail.Metadata>
+                }
               />
-              <CommandAction
-                title="Move Focused Window Here"
-                args={["move-node-to-workspace", item.workspace]}
+            }
+            actions={workspaceActions(item, refresh)}
+          />
+        ))}
+      </List.Section>
+      {empty.length > 0 ? (
+        <List.Section title="Empty" subtitle={`${empty.length} workspaces`}>
+          <List.Item
+            icon={Icon.Ellipsis}
+            title={`${empty.length} Empty Workspaces`}
+            subtitle={shorten(empty.map((item) => item.workspace).join(" · "), 80)}
+            accessories={[{ text: "Press Return to expand" }]}
+            detail={
+              <List.Item.Detail
+                markdown={emptyWorkspacesMarkdown(empty)}
+                metadata={
+                  <List.Item.Detail.Metadata>
+                    <List.Item.Detail.Metadata.Label
+                      title="Available"
+                      text={`${empty.length} workspaces`}
+                    />
+                    <List.Item.Detail.Metadata.Label
+                      title="Monitors"
+                      text={String(new Set(empty.map((item) => item["monitor-id"])).size)}
+                    />
+                    <List.Item.Detail.Metadata.Label title="Windows" text="0" />
+                  </List.Item.Detail.Metadata>
+                }
               />
-              <CommandAction
-                title="Summon Workspace to Focused Monitor"
-                args={["summon-workspace", item.workspace]}
-              />
-              <ActionPanel.Section>
-                <CommandAction
-                  title="Balance Window Sizes"
-                  args={["balance-sizes", "--workspace", item.workspace]}
-                />
-                <CommandAction
-                  title="Flatten Workspace Tree"
-                  args={["flatten-workspace-tree", "--workspace", item.workspace]}
+            }
+            actions={
+              <ActionPanel>
+                <Action
+                  title="Expand Empty Workspaces"
+                  icon={Icon.ArrowRight}
+                  onAction={() => push(<EmptyWorkspacesView items={empty} />)}
                 />
                 <Action
                   title="Refresh Workspaces"
@@ -547,11 +721,11 @@ export function WorkspacesView() {
                   shortcut={Keyboard.Shortcut.Common.Refresh}
                   onAction={refresh}
                 />
-              </ActionPanel.Section>
-            </ActionPanel>
-          }
-        />
-      ))}
+              </ActionPanel>
+            }
+          />
+        </List.Section>
+      ) : null}
     </List>
   );
 }

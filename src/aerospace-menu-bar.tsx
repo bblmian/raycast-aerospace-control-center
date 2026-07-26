@@ -6,7 +6,7 @@ import {
   aerospace,
   errorMessage,
   getServiceSummary,
-  jsonCommand,
+  listWorkspaces,
   reloadAerospace,
   toggleAerospace,
 } from "./utils/aerospace";
@@ -21,9 +21,7 @@ async function loadMenu(): Promise<MenuData> {
   const summary = await getServiceSummary();
   let workspaces: WorkspaceInfo[] = [];
   if (summary.state === "enabled") {
-    workspaces = await jsonCommand<WorkspaceInfo[]>(["list-workspaces", "--all", "--json"]).catch(
-      () => [],
-    );
+    workspaces = await listWorkspaces().catch(() => []);
   }
   return { ...summary, workspaces };
 }

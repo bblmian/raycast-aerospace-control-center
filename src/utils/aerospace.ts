@@ -17,6 +17,21 @@ export type WorkspaceInfo = {
   "workspace-is-focused": boolean;
   "workspace-is-visible": boolean;
 };
+export type WindowInfo = {
+  "window-id": number;
+  "app-name": string;
+  "app-bundle-id": string;
+  "window-title": string;
+  workspace: string;
+  "monitor-id": number;
+  "monitor-name": string;
+  "window-layout": string;
+};
+
+const WORKSPACE_LIST_FORMAT =
+  "%{workspace} %{monitor-id} %{monitor-name} %{workspace-is-focused} %{workspace-is-visible}";
+const WINDOW_LIST_FORMAT =
+  "%{window-id} %{app-name} %{app-bundle-id} %{window-title} %{workspace} %{monitor-id} %{monitor-name} %{window-layout}";
 
 type Preferences = {
   aerospaceBinaryPath?: string;
@@ -153,6 +168,26 @@ export async function aerospace(args: string[]): Promise<CommandResult> {
 export async function jsonCommand<T>(args: string[]): Promise<T> {
   const { stdout } = await aerospace(args);
   return JSON.parse(stdout) as T;
+}
+
+export function listWorkspaces(): Promise<WorkspaceInfo[]> {
+  return jsonCommand<WorkspaceInfo[]>([
+    "list-workspaces",
+    "--all",
+    "--json",
+    "--format",
+    WORKSPACE_LIST_FORMAT,
+  ]);
+}
+
+export function listWindows(): Promise<WindowInfo[]> {
+  return jsonCommand<WindowInfo[]>([
+    "list-windows",
+    "--all",
+    "--json",
+    "--format",
+    WINDOW_LIST_FORMAT,
+  ]);
 }
 
 export async function getServiceState(): Promise<ServiceState> {
