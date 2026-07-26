@@ -10,6 +10,7 @@ import {
   reloadAerospace,
   toggleAerospace,
 } from "./utils/aerospace";
+import { coloredIcon, PALETTE } from "./utils/theme";
 
 type MenuData = {
   state: ServiceState;
@@ -38,8 +39,10 @@ async function execute(task: () => Promise<{ stdout: string; stderr: string }>) 
 export default function Command() {
   const { data, isLoading, revalidate } = usePromise(loadMenu);
   const state = data?.state ?? "stopped";
-  const icon =
-    state === "enabled" ? Icon.CircleFilled : state === "disabled" ? Icon.Pause : Icon.Circle;
+  const icon = coloredIcon(
+    state === "enabled" ? Icon.CircleFilled : state === "disabled" ? Icon.Pause : Icon.Circle,
+    state === "enabled" ? PALETTE.green : state === "disabled" ? PALETTE.amber : PALETTE.secondary,
+  );
 
   return (
     <MenuBarExtra icon={icon} isLoading={isLoading} tooltip={data?.label || "AeroSpace Status"}>
@@ -51,7 +54,10 @@ export default function Command() {
           {data.workspaces.map((workspace) => (
             <MenuBarExtra.Item
               key={`${workspace["monitor-id"]}-${workspace.workspace}`}
-              icon={workspace["workspace-is-focused"] ? Icon.CheckCircle : Icon.Window}
+              icon={coloredIcon(
+                workspace["workspace-is-focused"] ? Icon.CheckCircle : Icon.Window,
+                workspace["workspace-is-focused"] ? PALETTE.green : PALETTE.indigo,
+              )}
               title={`Workspace ${workspace.workspace}`}
               subtitle={workspace["monitor-name"]}
               onAction={() => execute(() => aerospace(["workspace", workspace.workspace]))}
@@ -61,7 +67,10 @@ export default function Command() {
       ) : null}
       <MenuBarExtra.Section title="Quick Controls">
         <MenuBarExtra.Item
-          icon={state === "enabled" ? Icon.Pause : Icon.Play}
+          icon={coloredIcon(
+            state === "enabled" ? Icon.Pause : Icon.Play,
+            state === "enabled" ? PALETTE.amber : PALETTE.green,
+          )}
           title={
             state === "enabled"
               ? "Pause AeroSpace"
@@ -75,19 +84,19 @@ export default function Command() {
           }}
         />
         <MenuBarExtra.Item
-          icon={Icon.AppWindow}
+          icon={coloredIcon(Icon.AppWindow, PALETTE.indigo)}
           title="Toggle Focused Window Floating / Tiling"
           onAction={() => execute(() => aerospace(["layout", "floating", "tiling"]))}
         />
         <MenuBarExtra.Item
-          icon={Icon.RotateClockwise}
+          icon={coloredIcon(Icon.RotateClockwise, PALETTE.blue)}
           title="Reload Configuration"
           onAction={() => execute(reloadAerospace)}
         />
       </MenuBarExtra.Section>
       <MenuBarExtra.Section>
         <MenuBarExtra.Item
-          icon={Icon.AppWindowGrid3x3}
+          icon={coloredIcon(Icon.AppWindowGrid3x3, PALETTE.teal)}
           title="Open Control Center"
           onAction={() =>
             launchCommand({

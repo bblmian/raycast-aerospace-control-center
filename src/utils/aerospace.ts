@@ -27,11 +27,19 @@ export type WindowInfo = {
   "monitor-name": string;
   "window-layout": string;
 };
+export type MonitorInfo = {
+  "monitor-id": number;
+  "monitor-name": string;
+  "monitor-appkit-nsscreen-screens-id": number;
+  "monitor-is-main": boolean;
+};
 
 const WORKSPACE_LIST_FORMAT =
   "%{workspace} %{monitor-id} %{monitor-name} %{workspace-is-focused} %{workspace-is-visible}";
 const WINDOW_LIST_FORMAT =
   "%{window-id} %{app-name} %{app-bundle-id} %{window-title} %{workspace} %{monitor-id} %{monitor-name} %{window-layout}";
+const MONITOR_LIST_FORMAT =
+  "%{monitor-id} %{monitor-name} %{monitor-appkit-nsscreen-screens-id} %{monitor-is-main}";
 
 type Preferences = {
   aerospaceBinaryPath?: string;
@@ -188,6 +196,10 @@ export function listWindows(): Promise<WindowInfo[]> {
     "--format",
     WINDOW_LIST_FORMAT,
   ]);
+}
+
+export function listMonitors(): Promise<MonitorInfo[]> {
+  return jsonCommand<MonitorInfo[]>(["list-monitors", "--json", "--format", MONITOR_LIST_FORMAT]);
 }
 
 export async function getServiceState(): Promise<ServiceState> {

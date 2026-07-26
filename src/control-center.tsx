@@ -2,7 +2,6 @@ import {
   Action,
   ActionPanel,
   Alert,
-  Color,
   Detail,
   Form,
   Icon,
@@ -21,6 +20,7 @@ import {
 import { useEffect, useState } from "react";
 import {
   ALL_SUBCOMMANDS,
+  MonitorInfo,
   ServiceState,
   WindowInfo,
   WorkspaceInfo,
@@ -28,8 +28,8 @@ import {
   diagnoseInstallation,
   errorMessage,
   getServiceSummary,
-  jsonCommand,
   listAvailableSubcommands,
+  listMonitors,
   listWindows,
   listWorkspaces,
   quitAerospace,
@@ -40,13 +40,7 @@ import {
   toggleAerospace,
 } from "./utils/aerospace";
 import { readWindowRule, saveWindowRule } from "./utils/rules";
-
-type MonitorInfo = {
-  "monitor-id": number;
-  "monitor-name": string;
-  "monitor-appkit-nsscreen-screens-id": number;
-  "monitor-is-main": boolean;
-};
+import { coloredIcon, PALETTE } from "./utils/theme";
 
 async function run(
   title: string,
@@ -328,6 +322,23 @@ export function WindowsView() {
             window["app-bundle-id"],
             window.workspace || "",
             String(window["window-id"]),
+            window["monitor-name"],
+            window["window-layout"],
+          ]}
+          accessories={[
+            {
+              tag: {
+                value: `Workspace ${window.workspace}`,
+                color: PALETTE.indigo,
+              },
+            },
+            {
+              text: layoutLabel(window["window-layout"]),
+              icon: coloredIcon(
+                Icon.AppWindow,
+                window["window-layout"] === "floating" ? PALETTE.coral : PALETTE.blue,
+              ),
+            },
           ]}
           detail={
             <List.Item.Detail
@@ -338,13 +349,13 @@ export function WindowsView() {
                   <List.Item.Detail.Metadata.Label
                     title="Workspace"
                     text={window.workspace || "Unknown"}
-                    icon={Icon.Window}
+                    icon={coloredIcon(Icon.Window, PALETTE.indigo)}
                   />
                   {window["monitor-name"] ? (
                     <List.Item.Detail.Metadata.Label
                       title="Monitor"
                       text={window["monitor-name"]}
-                      icon={Icon.Desktop}
+                      icon={coloredIcon(Icon.Desktop, PALETTE.teal)}
                     />
                   ) : null}
                   <List.Item.Detail.Metadata.Separator />
@@ -359,6 +370,10 @@ export function WindowsView() {
                   <List.Item.Detail.Metadata.Label
                     title="Layout"
                     text={window["window-layout"] || "Unknown"}
+                    icon={coloredIcon(
+                      Icon.AppWindow,
+                      window["window-layout"] === "floating" ? PALETTE.coral : PALETTE.blue,
+                    )}
                   />
                 </List.Item.Detail.Metadata>
               }
@@ -532,7 +547,7 @@ function EmptyWorkspacesView({ items }: { items: WorkspaceInfo[] }) {
         {items.map((item) => (
           <List.Item
             key={`${item["monitor-id"]}-${item.workspace}`}
-            icon={Icon.Circle}
+            icon={coloredIcon(Icon.Circle, PALETTE.secondary)}
             title={`Workspace ${item.workspace}`}
             subtitle={item["monitor-name"]}
             keywords={[item.workspace, item["monitor-name"], String(item["monitor-id"])]}
@@ -620,7 +635,10 @@ export function WorkspacesView() {
         {populated.map((item) => (
           <List.Item
             key={`${item["monitor-id"]}-${item.workspace}`}
-            icon={item["workspace-is-focused"] ? Icon.Dot : Icon.Window}
+            icon={coloredIcon(
+              item["workspace-is-focused"] ? Icon.Dot : Icon.Window,
+              item["workspace-is-focused"] ? PALETTE.green : PALETTE.indigo,
+            )}
             title={`Workspace ${item.workspace}`}
             subtitle={`${item["monitor-name"]} · ${
               item.appNames.length > 0 ? appSummary(item.appNames) : "Visible · Empty"
@@ -634,9 +652,9 @@ export function WorkspacesView() {
             ]}
             accessories={[
               ...(item["workspace-is-focused"]
-                ? [{ tag: { value: "Focused", color: Color.Green } }]
+                ? [{ tag: { value: "Focused", color: PALETTE.green } }]
                 : item["workspace-is-visible"]
-                  ? [{ tag: { value: "Visible", color: Color.Blue } }]
+                  ? [{ tag: { value: "Visible", color: PALETTE.blue } }]
                   : []),
               { text: `${item.windows.length} window${item.windows.length === 1 ? "" : "s"}` },
               { text: `${item.appNames.length} app${item.appNames.length === 1 ? "" : "s"}` },
@@ -686,7 +704,7 @@ export function WorkspacesView() {
       {empty.length > 0 ? (
         <List.Section title="Empty" subtitle={`${empty.length} workspaces`}>
           <List.Item
-            icon={Icon.Ellipsis}
+            icon={coloredIcon(Icon.Ellipsis, PALETTE.secondary)}
             title={`${empty.length} Empty Workspaces`}
             subtitle={shorten(empty.map((item) => item.workspace).join(" · "), 80)}
             accessories={[{ text: "Press Return to expand" }]}
@@ -730,22 +748,119 @@ export function WorkspacesView() {
   );
 }
 
+type MonitorSummary = MonitorInfo & {
+  workspaces: WorkspaceSummary[];
+  windows: WindowInfo[];
+};
+
+function monitorMarkdown(item: MonitorSummary): string {
+  const rows = item.workspaces
+    .map(
+      (workspace) =>
+        `| ${workspace.workspace} | ${workspace.windows.length} | ${workspace.appNames.length} | ${
+          workspace["workspace-is-focused"]
+            ? "Focused"
+            : workspace["workspace-is-visible"]
+              ? "Visible"
+              : "Inactive"
+        } |`,
+    )
+    .join("\n");
+  return `## Workspaces\n\n| Workspace | Windows | Apps | State |\n| :-- | --: | --: | :-- |\n${rows}`;
+}
+
 function MonitorsView() {
-  const [items, setItems] = useState<MonitorInfo[]>([]);
+  const [items, setItems] = useState<MonitorSummary[]>([]);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    jsonCommand<MonitorInfo[]>(["list-monitors", "--json"])
-      .then(setItems)
-      .catch((error) => showToast({ style: Toast.Style.Failure, title: errorMessage(error) }));
+    Promise.all([listMonitors(), listWorkspaces(), listWindows()])
+      .then(([monitors, workspaces, windows]) => {
+        setItems(
+          monitors.map((monitor) => {
+            const monitorWorkspaces = workspaces
+              .filter((workspace) => workspace["monitor-id"] === monitor["monitor-id"])
+              .map((workspace) => {
+                const workspaceWindows = windows.filter(
+                  (window) => window.workspace === workspace.workspace,
+                );
+                return {
+                  ...workspace,
+                  windows: workspaceWindows,
+                  appNames: [...new Set(workspaceWindows.map((window) => window["app-name"]))],
+                };
+              });
+            return {
+              ...monitor,
+              workspaces: monitorWorkspaces,
+              windows: windows.filter((window) => window["monitor-id"] === monitor["monitor-id"]),
+            };
+          }),
+        );
+      })
+      .catch((error) => showToast({ style: Toast.Style.Failure, title: errorMessage(error) }))
+      .finally(() => setLoading(false));
   }, []);
   return (
-    <List>
+    <List
+      isLoading={loading}
+      isShowingDetail
+      navigationTitle="AeroSpace Monitors"
+      searchBarPlaceholder="Search monitors or workspaces…"
+    >
       {items.map((item) => (
         <List.Item
           key={item["monitor-id"]}
-          icon={Icon.Desktop}
+          icon={coloredIcon(Icon.Desktop, PALETTE.teal)}
           title={item["monitor-name"]}
-          subtitle={`Monitor ${item["monitor-id"]}`}
-          accessories={item["monitor-is-main"] ? [{ tag: "Main Monitor" }] : []}
+          subtitle={`Monitor ${item["monitor-id"]} · Workspaces ${shorten(
+            item.workspaces.map((workspace) => workspace.workspace).join(" · "),
+            40,
+          )}`}
+          keywords={[
+            item["monitor-name"],
+            String(item["monitor-id"]),
+            ...item.workspaces.map((workspace) => workspace.workspace),
+          ]}
+          accessories={[
+            ...(item["monitor-is-main"] ? [{ tag: { value: "Main", color: PALETTE.green } }] : []),
+            { text: `${item.workspaces.length} workspaces` },
+            { text: `${item.windows.length} windows` },
+          ]}
+          detail={
+            <List.Item.Detail
+              markdown={monitorMarkdown(item)}
+              metadata={
+                <List.Item.Detail.Metadata>
+                  <List.Item.Detail.Metadata.Label
+                    title="Display"
+                    text={item["monitor-name"]}
+                    icon={coloredIcon(Icon.Desktop, PALETTE.teal)}
+                  />
+                  <List.Item.Detail.Metadata.Label
+                    title="Monitor ID"
+                    text={String(item["monitor-id"])}
+                  />
+                  <List.Item.Detail.Metadata.Label
+                    title="macOS Screen ID"
+                    text={String(item["monitor-appkit-nsscreen-screens-id"])}
+                  />
+                  <List.Item.Detail.Metadata.Separator />
+                  <List.Item.Detail.Metadata.Label
+                    title="Workspaces"
+                    text={String(item.workspaces.length)}
+                  />
+                  <List.Item.Detail.Metadata.Label
+                    title="Windows"
+                    text={String(item.windows.length)}
+                  />
+                  <List.Item.Detail.Metadata.Label
+                    title="Role"
+                    text={item["monitor-is-main"] ? "Main Monitor" : "Secondary Monitor"}
+                  />
+                </List.Item.Detail.Metadata>
+              }
+            />
+          }
           actions={
             <ActionPanel>
               <CommandAction
@@ -940,14 +1055,21 @@ function QuickCommandsView() {
     (result[item.section] ||= []).push(item);
     return result;
   }, {});
+  const sectionColors: Record<string, string> = {
+    "Focus and Move": PALETTE.blue,
+    Layout: PALETTE.teal,
+    "Size and Window": PALETTE.amber,
+    Workspace: PALETTE.green,
+    Maintenance: PALETTE.slate,
+  };
   return (
     <List searchBarPlaceholder="Search AeroSpace actions…">
       {Object.entries(grouped).map(([section, items]) => (
-        <List.Section key={section} title={section}>
+        <List.Section key={section} title={section} subtitle={`${items.length} actions`}>
           {items.map((item) => (
             <List.Item
               key={item.subtitle}
-              icon={item.icon}
+              icon={coloredIcon(item.icon, sectionColors[section] || PALETTE.secondary)}
               title={item.title}
               subtitle={item.subtitle}
               actions={
@@ -1102,6 +1224,14 @@ export default function ControlCenter() {
           ? "Configure AeroSpace"
           : "Start AeroSpace";
   const serviceIcon = state === "enabled" ? Icon.Pause : Icon.Play;
+  const serviceSubtitle =
+    state === "enabled"
+      ? "Automatic window management is active"
+      : state === "disabled"
+        ? "AeroSpace is running, but window management is paused"
+        : state === "not-installed"
+          ? "Set up installation paths or install AeroSpace"
+          : "Start the app and restore window management";
 
   return (
     <List
@@ -1109,21 +1239,29 @@ export default function ControlCenter() {
       navigationTitle="AeroSpace Control Center"
       searchBarPlaceholder="Search controls…"
     >
-      <List.Section title="Status">
+      <List.Section title="Status" subtitle="Installation and service health">
         <List.Item
           icon={{
             source: state === "enabled" ? Icon.CircleFilled : Icon.Circle,
             tintColor:
               state === "enabled"
-                ? Color.Green
+                ? PALETTE.green
                 : state === "disabled"
-                  ? Color.Orange
+                  ? PALETTE.amber
                   : state === "not-installed"
-                    ? Color.Red
-                    : Color.SecondaryText,
+                    ? PALETTE.coral
+                    : PALETTE.secondary,
           }}
-          title={stateLabel}
-          subtitle={configPath || "No custom configuration detected"}
+          title={`AeroSpace ${stateLabel}`}
+          subtitle={serviceSubtitle}
+          accessories={[
+            {
+              tag: {
+                value: configPath ? "Config Ready" : "Built-in Defaults",
+                color: configPath ? PALETTE.teal : PALETTE.secondary,
+              },
+            },
+          ]}
           actions={
             <ActionPanel>
               <Action
@@ -1153,9 +1291,9 @@ export default function ControlCenter() {
           }
         />
       </List.Section>
-      <List.Section title="Browse and Control">
+      <List.Section title="Browse and Control" subtitle="Live window management">
         <List.Item
-          icon={Icon.AppWindow}
+          icon={coloredIcon(Icon.AppWindow, PALETTE.blue)}
           title="Windows"
           subtitle="Focus, move, resize, change layout, minimize, or close"
           actions={
@@ -1165,9 +1303,9 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.Window}
+          icon={coloredIcon(Icon.Window, PALETTE.indigo)}
           title="Workspaces"
-          subtitle="Switch, summon, balance, or flatten"
+          subtitle="Window and app counts, monitors, switching, and layout tools"
           actions={
             <ActionPanel>
               <Action title="Browse Workspaces" onAction={() => push(<WorkspacesView />)} />
@@ -1175,7 +1313,7 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.Desktop}
+          icon={coloredIcon(Icon.Desktop, PALETTE.teal)}
           title="Monitors"
           subtitle="Focus a monitor or move windows and workspaces"
           actions={
@@ -1185,7 +1323,7 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.Bolt}
+          icon={coloredIcon(Icon.Bolt, PALETTE.amber)}
           title="Quick Actions"
           subtitle="Focus, move, split, resize, and maintain layouts"
           actions={
@@ -1195,10 +1333,11 @@ export default function ControlCenter() {
           }
         />
       </List.Section>
-      <List.Section title="Service">
+      <List.Section title="Service" subtitle="Lifecycle and configuration">
         <List.Item
-          icon={serviceIcon}
+          icon={coloredIcon(serviceIcon, state === "enabled" ? PALETTE.amber : PALETTE.green)}
           title={serviceAction}
+          subtitle={serviceSubtitle}
           actions={
             <ActionPanel>
               <Action
@@ -1213,8 +1352,9 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.RotateClockwise}
+          icon={coloredIcon(Icon.RotateClockwise, PALETTE.blue)}
           title="Reload Configuration"
+          subtitle="Apply changes from the active aerospace.toml"
           actions={
             <ActionPanel>
               <Action
@@ -1225,8 +1365,9 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.Power}
+          icon={coloredIcon(Icon.Power, PALETTE.coral)}
           title="Quit AeroSpace"
+          subtitle="Stop the app and automatic window management"
           actions={
             <ActionPanel>
               <Action
@@ -1250,9 +1391,9 @@ export default function ControlCenter() {
           }
         />
       </List.Section>
-      <List.Section title="Advanced">
+      <List.Section title="Advanced" subtitle="Diagnostics and power tools">
         <List.Item
-          icon={Icon.Heartbeat}
+          icon={coloredIcon(Icon.Heartbeat, PALETTE.green)}
           title="Compatibility Check"
           subtitle="Detected paths, versions, configuration, and issues"
           actions={
@@ -1262,7 +1403,7 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.Desktop}
+          icon={coloredIcon(Icon.Desktop, PALETTE.indigo)}
           title="AeroSpace Menu Bar"
           subtitle="Persistent status, workspaces, and quick controls"
           actions={
@@ -1281,7 +1422,7 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.Terminal}
+          icon={coloredIcon(Icon.Terminal, PALETTE.amber)}
           title="Run Any AeroSpace Command"
           subtitle={`${ALL_SUBCOMMANDS.length} subcommands with direct argument passing`}
           actions={
@@ -1291,8 +1432,9 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.List}
+          icon={coloredIcon(Icon.List, PALETTE.blue)}
           title="Running Applications"
+          subtitle="Inspect applications currently managed by AeroSpace"
           actions={
             <ActionPanel>
               <Action
@@ -1305,8 +1447,9 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.Gear}
+          icon={coloredIcon(Icon.Gear, PALETTE.indigo)}
           title="Binding Modes"
+          subtitle="Inspect active and configured keyboard binding modes"
           actions={
             <ActionPanel>
               <Action
@@ -1317,8 +1460,9 @@ export default function ControlCenter() {
           }
         />
         <List.Item
-          icon={Icon.Code}
+          icon={coloredIcon(Icon.Code, PALETTE.slate)}
           title="Execution Environment"
+          subtitle="Inspect environment variables available to AeroSpace commands"
           actions={
             <ActionPanel>
               <Action

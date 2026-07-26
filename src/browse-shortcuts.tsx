@@ -1,26 +1,27 @@
-import { Action, ActionPanel, Color, Icon, List, showToast, Toast } from "@raycast/api";
+import { Action, ActionPanel, Icon, List, showToast, Toast } from "@raycast/api";
 import { useEffect, useState } from "react";
 import { parseShortcuts, Shortcut } from "./utils/config-parser";
 import { aerospace } from "./utils/aerospace";
+import { coloredIcon, PALETTE } from "./utils/theme";
 
-const CATEGORY_CONFIG: Record<string, { icon: Icon; color: Color }> = {
-  Focus: { icon: Icon.Eye, color: Color.Blue },
-  "Move Window": { icon: Icon.ArrowRight, color: Color.Green },
-  Workspace: { icon: Icon.Window, color: Color.Purple },
-  "Move to Workspace": { icon: Icon.ArrowUpCircleFilled, color: Color.Orange },
-  Layout: { icon: Icon.AppWindowGrid3x3, color: Color.Yellow },
-  Resize: { icon: Icon.FullSignal, color: Color.Magenta },
-  Join: { icon: Icon.Link, color: Color.Red },
-  Service: { icon: Icon.Gear, color: Color.SecondaryText },
-  Launch: { icon: Icon.Terminal, color: Color.SecondaryText },
-  Other: { icon: Icon.Dot, color: Color.SecondaryText },
+const CATEGORY_CONFIG: Record<string, { icon: Icon; color: string }> = {
+  Focus: { icon: Icon.Eye, color: PALETTE.blue },
+  "Move Window": { icon: Icon.ArrowRight, color: PALETTE.teal },
+  Workspace: { icon: Icon.Window, color: PALETTE.indigo },
+  "Move to Workspace": { icon: Icon.ArrowUpCircleFilled, color: PALETTE.amber },
+  Layout: { icon: Icon.AppWindowGrid3x3, color: PALETTE.green },
+  Resize: { icon: Icon.FullSignal, color: PALETTE.slate },
+  Join: { icon: Icon.Link, color: PALETTE.coral },
+  Service: { icon: Icon.Gear, color: PALETTE.secondary },
+  Launch: { icon: Icon.Terminal, color: PALETTE.secondary },
+  Other: { icon: Icon.Dot, color: PALETTE.secondary },
 };
 
 async function triggerShortcut(shortcut: Shortcut): Promise<void> {
   await aerospace(["trigger-binding", shortcut.key, "--mode", shortcut.mode]);
 }
 
-function getCategoryConfig(category: string): { icon: Icon; color: Color } {
+function getCategoryConfig(category: string): { icon: Icon; color: string } {
   const base = category.replace(/^\[.*?\]\s*/, "");
   return CATEGORY_CONFIG[base] ?? CATEGORY_CONFIG["Other"];
 }
@@ -75,14 +76,14 @@ export default function BrowseShortcuts() {
             {items.map((item) => (
               <List.Item
                 key={item.id}
-                icon={{ source: icon, tintColor: color }}
+                icon={coloredIcon(icon, color)}
                 title={item.description}
                 subtitle={item.command !== item.description ? item.command : undefined}
                 accessories={[
                   {
                     tag: {
                       value: item.keyDisplay,
-                      color: item.mode === "main" ? Color.Blue : Color.Orange,
+                      color: item.mode === "main" ? PALETTE.blue : PALETTE.amber,
                     },
                   },
                 ]}
