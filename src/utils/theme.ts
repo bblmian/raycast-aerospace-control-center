@@ -11,6 +11,17 @@ export const PALETTE = {
   secondary: "#858A93",
 };
 
+export const NEON = {
+  blue: "#27D3FF",
+  purple: "#B56CFF",
+  cyan: "#27F0D2",
+  green: "#48F08B",
+  yellow: "#FFD85A",
+  orange: "#FF9D4D",
+  pink: "#FF63B4",
+  red: "#FF667A",
+};
+
 export function coloredIcon(source: Icon, tintColor: string) {
   return { source, tintColor };
 }

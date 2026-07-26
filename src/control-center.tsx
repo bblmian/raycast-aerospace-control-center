@@ -42,7 +42,7 @@ import {
   toggleAerospace,
 } from "./utils/aerospace";
 import { readWindowRule, saveWindowRule } from "./utils/rules";
-import { coloredIcon, PALETTE } from "./utils/theme";
+import { coloredIcon, NEON, PALETTE } from "./utils/theme";
 import { SETUP_COMPLETE_KEY, SetupGate, checkSetupReadiness } from "./setup";
 
 async function run(
@@ -1026,17 +1026,17 @@ function QuickCommandsView() {
     return result;
   }, {});
   const sectionColors: Record<string, string> = {
-    "Focus and Move": PALETTE.blue,
-    Layout: PALETTE.teal,
-    "Size and Window": PALETTE.amber,
-    Workspace: PALETTE.green,
-    Maintenance: PALETTE.slate,
+    "Focus and Move": NEON.blue,
+    Layout: NEON.cyan,
+    "Size and Window": NEON.orange,
+    Workspace: NEON.purple,
+    Maintenance: NEON.green,
   };
   return (
     <Grid
-      columns={4}
+      columns={8}
       aspectRatio="1"
-      inset={Grid.Inset.Medium}
+      inset={Grid.Inset.Large}
       searchBarPlaceholder="Search AeroSpace actions…"
       navigationTitle="AeroSpace Quick Actions"
     >
@@ -1045,7 +1045,7 @@ function QuickCommandsView() {
           key={section}
           title={section}
           subtitle={`${items.length} actions`}
-          columns={4}
+          columns={8}
         >
           {items.map((item) => (
             <Grid.Item
@@ -1055,7 +1055,6 @@ function QuickCommandsView() {
                 tooltip: `${item.title} — aerospace ${item.subtitle}`,
               }}
               title={item.title}
-              subtitle={item.subtitle}
               actions={
                 <ActionPanel>
                   <CommandAction title={item.title} args={item.args} onDone={popToRoot} />
@@ -1246,20 +1245,19 @@ export default function ControlCenter() {
   return (
     <Grid
       isLoading={loading}
-      columns={4}
-      aspectRatio="4/3"
-      inset={Grid.Inset.Medium}
+      columns={8}
+      aspectRatio="1"
+      inset={Grid.Inset.Large}
       navigationTitle="AeroSpace Control Center"
       searchBarPlaceholder="Search controls…"
     >
-      <Grid.Section title="Browse and Control" subtitle="Live window management" columns={4}>
+      <Grid.Section title="Browse and Control" subtitle="Live window management" columns={8}>
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.AppWindow, PALETTE.blue),
+            value: coloredIcon(Icon.AppWindow, NEON.blue),
             tooltip: "Focus, move, resize, change layout, minimize, or close windows",
           }}
           title="Windows"
-          subtitle="Focus and manage"
           actions={
             <ActionPanel>
               <Action title="Browse Windows" onAction={() => push(<WindowsView />)} />
@@ -1268,11 +1266,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Window, PALETTE.indigo),
+            value: coloredIcon(Icon.Window, NEON.purple),
             tooltip: "See window and app counts, switch workspaces, summon, balance, or flatten",
           }}
           title="Workspaces"
-          subtitle="Switch and organize"
           actions={
             <ActionPanel>
               <Action title="Browse Workspaces" onAction={() => push(<WorkspacesView />)} />
@@ -1281,11 +1278,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Desktop, PALETTE.teal),
+            value: coloredIcon(Icon.Desktop, NEON.cyan),
             tooltip: "Focus displays or move windows and workspaces between monitors",
           }}
           title="Monitors"
-          subtitle="Manage displays"
           actions={
             <ActionPanel>
               <Action title="Browse Monitors" onAction={() => push(<MonitorsView />)} />
@@ -1294,11 +1290,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Bolt, PALETTE.amber),
+            value: coloredIcon(Icon.Bolt, NEON.yellow),
             tooltip: "Focus, move, split, resize, and maintain window layouts",
           }}
           title="Quick Actions"
-          subtitle="Focus, move, resize"
           actions={
             <ActionPanel>
               <Action title="Open Quick Actions" onAction={() => push(<QuickCommandsView />)} />
@@ -1307,25 +1302,24 @@ export default function ControlCenter() {
         />
       </Grid.Section>
 
-      <Grid.Section title="Service" subtitle="Status and lifecycle" columns={3}>
+      <Grid.Section title="Service" subtitle="Status and lifecycle" columns={8}>
         <Grid.Item
           content={{
             value: coloredIcon(
               state === "enabled" ? Icon.CircleFilled : Icon.Circle,
               state === "enabled"
-                ? PALETTE.green
+                ? NEON.green
                 : state === "disabled"
-                  ? PALETTE.amber
+                  ? NEON.orange
                   : state === "not-installed"
-                    ? PALETTE.coral
-                    : PALETTE.secondary,
+                    ? NEON.red
+                    : NEON.blue,
             ),
             tooltip: `${serviceSubtitle}. ${
               configPath ? "Configuration detected." : "Using built-in defaults."
             }`,
           }}
           title={stateLabel}
-          subtitle={configPath ? "Configuration ready" : "Built-in defaults"}
           actions={
             <ActionPanel>
               <Action
@@ -1356,11 +1350,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.RotateClockwise, PALETTE.blue),
+            value: coloredIcon(Icon.RotateClockwise, NEON.blue),
             tooltip: "Apply changes from the active aerospace.toml configuration",
           }}
           title="Reload Config"
-          subtitle="Apply aerospace.toml"
           actions={
             <ActionPanel>
               <Action
@@ -1372,11 +1365,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Power, PALETTE.coral),
+            value: coloredIcon(Icon.Power, NEON.pink),
             tooltip: "Stop AeroSpace and automatic window management",
           }}
           title="Quit AeroSpace"
-          subtitle="Stop window management"
           actions={
             <ActionPanel>
               <Action
@@ -1401,14 +1393,13 @@ export default function ControlCenter() {
         />
       </Grid.Section>
 
-      <Grid.Section title="Tools" subtitle="Diagnostics and power features" columns={4}>
+      <Grid.Section title="Tools" subtitle="Diagnostics and power features" columns={8}>
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.WrenchScrewdriver, PALETTE.teal),
+            value: coloredIcon(Icon.WrenchScrewdriver, NEON.cyan),
             tooltip: "Check installation health and open the guided repair workflow",
           }}
           title="Setup & Repair"
-          subtitle="Installation health"
           actions={
             <ActionPanel>
               <Action
@@ -1421,11 +1412,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Heartbeat, PALETTE.green),
+            value: coloredIcon(Icon.Heartbeat, NEON.green),
             tooltip: "Review detected paths, client and server versions, configuration, and issues",
           }}
           title="Compatibility"
-          subtitle="Paths and versions"
           actions={
             <ActionPanel>
               <Action title="Run Compatibility Check" onAction={() => push(<DiagnosticsView />)} />
@@ -1434,11 +1424,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Desktop, PALETTE.indigo),
+            value: coloredIcon(Icon.Desktop, NEON.purple),
             tooltip: "Enable persistent status, workspaces, and controls in the macOS menu bar",
           }}
           title="Menu Bar"
-          subtitle="Persistent controls"
           actions={
             <ActionPanel>
               <Action
@@ -1456,11 +1445,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Terminal, PALETTE.amber),
+            value: coloredIcon(Icon.Terminal, NEON.yellow),
             tooltip: `Run any of ${ALL_SUBCOMMANDS.length} detected AeroSpace subcommands`,
           }}
           title="Any Command"
-          subtitle={`${ALL_SUBCOMMANDS.length} subcommands`}
           actions={
             <ActionPanel>
               <Action title="Open Command Form" onAction={() => push(<AnyCommandForm />)} />
@@ -1469,11 +1457,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.List, PALETTE.blue),
+            value: coloredIcon(Icon.List, NEON.blue),
             tooltip: "Inspect applications currently managed by AeroSpace",
           }}
           title="Applications"
-          subtitle="Managed apps"
           actions={
             <ActionPanel>
               <Action
@@ -1487,11 +1474,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Gear, PALETTE.indigo),
+            value: coloredIcon(Icon.Gear, NEON.pink),
             tooltip: "Inspect active and configured keyboard binding modes",
           }}
           title="Binding Modes"
-          subtitle="Keyboard modes"
           actions={
             <ActionPanel>
               <Action
@@ -1503,11 +1489,10 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: coloredIcon(Icon.Code, PALETTE.slate),
+            value: coloredIcon(Icon.Code, NEON.cyan),
             tooltip: "Inspect environment variables available to AeroSpace commands",
           }}
           title="Environment"
-          subtitle="Execution variables"
           actions={
             <ActionPanel>
               <Action
