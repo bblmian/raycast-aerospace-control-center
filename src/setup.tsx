@@ -1,6 +1,7 @@
 import {
   Action,
   ActionPanel,
+  Form,
   Icon,
   Keyboard,
   List,
@@ -11,27 +12,41 @@ import {
   openExtensionPreferences,
   popToRoot,
   showToast,
+  useNavigation,
 } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
 import {
   InstallationInfo,
+  AeroSpaceRelease,
   CommandResult,
+  ConfigurationProfile,
+  InstallationProgress,
+  compareAeroSpaceVersions,
   createDefaultConfig,
   diagnoseInstallation,
   existingConfigPaths,
   findHomebrewBinary,
+  getLatestAeroSpaceRelease,
+  installLatestAeroSpaceDirect,
   installAerospaceWithHomebrew,
+  isAeroSpaceManagedByHomebrew,
   reloadAerospace,
   startAerospace,
+  updateAerospaceWithHomebrew,
 } from "./utils/aerospace";
 import { coloredIcon, PALETTE } from "./utils/theme";
 
 export const SETUP_COMPLETE_KEY = "aerospace-control-center.setup-complete-v1";
+const RELEASE_CACHE_KEY = "aerospace-control-center.latest-release-v1";
+const RELEASE_CACHE_TTL = 60 * 60 * 1000;
 
 type SetupSnapshot = {
   installation: InstallationInfo;
   brewPath: string | null;
   configPaths: string[];
+  brewManaged: boolean;
+  latestRelease: AeroSpaceRelease | null;
+  releaseError?: string;
 };
 
 export type SetupReadiness = {
@@ -48,13 +63,53 @@ type SetupStep = {
   markdown: string;
 };
 
+async function latestReleaseWithCache(): Promise<{
+  release: AeroSpaceRelease | null;
+  error?: string;
+}> {
+  const cachedValue = await LocalStorage.getItem<string>(RELEASE_CACHE_KEY);
+  let cached: { release: AeroSpaceRelease; fetchedAt: number } | null = null;
+  if (cachedValue) {
+    try {
+      cached = JSON.parse(cachedValue) as { release: AeroSpaceRelease; fetchedAt: number };
+    } catch {
+      cached = null;
+    }
+  }
+  if (cached && Date.now() - cached.fetchedAt < RELEASE_CACHE_TTL) {
+    return { release: cached.release };
+  }
+  try {
+    const release = await getLatestAeroSpaceRelease();
+    await LocalStorage.setItem(
+      RELEASE_CACHE_KEY,
+      JSON.stringify({ release, fetchedAt: Date.now() }),
+    );
+    return { release };
+  } catch (error) {
+    return {
+      release: cached?.release || null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 async function inspectSetup(): Promise<SetupSnapshot> {
-  const [installation, brewPath, configPaths] = await Promise.all([
+  const [installation, brewPath, configPaths, brewManaged, releaseResult] = await Promise.all([
     diagnoseInstallation(),
     findHomebrewBinary(),
     existingConfigPaths(),
+    isAeroSpaceManagedByHomebrew(),
+    latestReleaseWithCache(),
   ]);
-  return { installation, brewPath, configPaths };
+  return {
+    installation,
+    brewPath,
+    configPaths,
+    brewManaged,
+    latestRelease: releaseResult.release,
+    releaseError: releaseResult.error,
+  };
 }
 
 export async function checkSetupReadiness(): Promise<SetupReadiness> {
@@ -101,6 +156,87 @@ function nextStepAction(steps: SetupStep[], index: number, setSelectedId: (id: s
   ) : null;
 }
 
+function formatBytes(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function runProgressTask(
+  title: string,
+  task: (onProgress: (progress: InstallationProgress) => void) => Promise<CommandResult>,
+  onComplete: () => Promise<void>,
+) {
+  const toast = await showToast({ style: Toast.Style.Animated, title });
+  try {
+    const result = await task((progress) => {
+      toast.title = title;
+      toast.message =
+        progress.percent === undefined
+          ? progress.message
+          : `${progress.message} · ${progress.percent}%`;
+    });
+    toast.style = Toast.Style.Success;
+    toast.title = "Done";
+    toast.message = result.stdout || result.stderr || title;
+    await onComplete();
+  } catch (error) {
+    toast.style = Toast.Style.Failure;
+    toast.title = `${title} Failed`;
+    toast.message = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function ConfigurationChoiceForm({
+  onCreated,
+}: {
+  onCreated: (profile: ConfigurationProfile) => Promise<boolean>;
+}) {
+  const { pop } = useNavigation();
+  const [profile, setProfile] = useState<ConfigurationProfile>("recommended");
+
+  return (
+    <Form
+      navigationTitle="Choose Starter Configuration"
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm
+            title="Create Configuration"
+            icon={Icon.Document}
+            onSubmit={async () => {
+              if (await onCreated(profile)) pop();
+            }}
+          />
+        </ActionPanel>
+      }
+    >
+      <Form.Dropdown
+        id="profile"
+        title="Configuration"
+        value={profile}
+        onChange={(value) => setProfile(value as ConfigurationProfile)}
+      >
+        <Form.Dropdown.Item
+          value="recommended"
+          title="Recommended — Chat Apps Float"
+          icon={Icon.Stars}
+        />
+        <Form.Dropdown.Item
+          value="official"
+          title="Original AeroSpace Defaults"
+          icon={Icon.Document}
+        />
+      </Form.Dropdown>
+      <Form.Description
+        title="Recommended"
+        text="Starts from AeroSpace’s official configuration and adds floating rules for common chat and meeting apps, including Messages, Slack, Teams, WeChat, WeCom, DingTalk, Telegram, WhatsApp, ChatGPT, and Claude."
+      />
+      <Form.Description
+        title="Safety"
+        text="Creates ~/.aerospace.toml only when no configuration exists. Existing files are never overwritten."
+      />
+    </Form>
+  );
+}
+
 export function SetupGate({ onExit = popToRoot }: { onExit?: () => void }) {
   const [readiness, setReadiness] = useState<SetupReadiness | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,7 +272,11 @@ export function SetupGate({ onExit = popToRoot }: { onExit?: () => void }) {
     return <SetupWizard onExit={onExit} />;
   }
 
-  const { installation, configPaths } = readiness.snapshot;
+  const { installation, configPaths, latestRelease, brewManaged, releaseError } =
+    readiness.snapshot;
+  const updateAvailable =
+    Boolean(latestRelease && installation.clientVersion) &&
+    compareAeroSpaceVersions(installation.clientVersion, latestRelease?.version || null) < 0;
   return (
     <List
       navigationTitle="AeroSpace Setup & Repair"
@@ -147,20 +287,47 @@ export function SetupGate({ onExit = popToRoot }: { onExit?: () => void }) {
         <List.Item
           icon={coloredIcon(Icon.CheckCircle, PALETTE.green)}
           title="Setup Already Complete"
-          subtitle={`${installation.clientVersion || "AeroSpace"} · Configuration and CLI detected`}
+          subtitle={
+            updateAvailable
+              ? `${installation.clientVersion} · ${latestRelease?.version} available`
+              : `${installation.clientVersion || "AeroSpace"} · Configuration and CLI detected`
+          }
           accessories={[
             {
-              text: "Ready",
-              icon: coloredIcon(Icon.CheckCircle, PALETTE.green),
+              text: updateAvailable ? "Update Available" : "Ready",
+              icon: coloredIcon(
+                updateAvailable ? Icon.Download : Icon.CheckCircle,
+                updateAvailable ? PALETTE.amber : PALETTE.green,
+              ),
             },
           ]}
           detail={
             <List.Item.Detail
-              markdown={`## No Initialization Required\n\nAeroSpace is already installed and configured. Opening this command never reinstalls or rewrites a working setup.\n\n- **CLI:** \`${installation.binaryPath}\`\n- **Application:** \`${installation.appPath}\`\n- **Configuration:** \`${configPaths[0]}\`\n- **Service:** ${installation.state}\n- **Version:** ${installation.clientVersion || "Unknown"}`}
+              markdown={`## No Initialization Required\n\nAeroSpace is already installed and configured. Opening this command never reinstalls or rewrites a working setup.\n\n- **CLI:** \`${installation.binaryPath}\`\n- **Application:** \`${installation.appPath}\`\n- **Configuration:** \`${configPaths[0]}\`\n- **Service:** ${installation.state}\n- **Installed version:** ${installation.clientVersion || "Unknown"}\n- **Latest official release:** ${latestRelease?.version || `Unavailable${releaseError ? ` — ${releaseError}` : ""}`}\n\n${updateAvailable ? "An update is available, but it is optional and does **not** reopen initialization." : "Your installed version is current based on the latest available release check."}`}
             />
           }
           actions={
             <ActionPanel>
+              {updateAvailable && brewManaged ? (
+                <Action
+                  title={`Update to ${latestRelease?.version}`}
+                  icon={Icon.Download}
+                  onAction={async () => {
+                    const confirmed = await confirmAlert({
+                      title: `Update AeroSpace to ${latestRelease?.version}?`,
+                      message:
+                        "This uses the existing Homebrew installation method. Your AeroSpace configuration will not be changed.",
+                      primaryAction: { title: "Update" },
+                    });
+                    if (confirmed)
+                      await runProgressTask(
+                        "Updating AeroSpace",
+                        (onProgress) => updateAerospaceWithHomebrew(onProgress),
+                        refresh,
+                      );
+                  }}
+                />
+              ) : null}
               <Action title="Return to Control Center" icon={Icon.ArrowLeft} onAction={onExit} />
               <Action
                 title="Run Full Setup Again…"
@@ -195,6 +362,7 @@ export function SetupGate({ onExit = popToRoot }: { onExit?: () => void }) {
 }
 
 export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
+  const { push } = useNavigation();
   const [snapshot, setSnapshot] = useState<SetupSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("welcome");
@@ -231,8 +399,12 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
       ];
     }
 
-    const { installation, brewPath, configPaths } = snapshot;
+    const { installation, brewPath, configPaths, brewManaged, latestRelease, releaseError } =
+      snapshot;
     const installed = Boolean(installation.binaryPath && installation.appPath);
+    const updateAvailable =
+      Boolean(installed && latestRelease && installation.clientVersion) &&
+      compareAeroSpaceVersions(installation.clientVersion, latestRelease?.version || null) < 0;
     const configStatus =
       configPaths.length === 1 ? "ready" : configPaths.length > 1 ? "warning" : "action";
     const serviceReady = installation.state === "enabled";
@@ -261,18 +433,24 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
         id: "installation",
         title: "AeroSpace Installation",
         subtitle: installed
-          ? `${installation.clientVersion || "Installed"} · CLI and application detected`
+          ? updateAvailable
+            ? `${installation.clientVersion} installed · ${latestRelease?.version} available`
+            : `${installation.clientVersion || "Installed"} · CLI and application detected`
           : brewPath
-            ? "AeroSpace can be installed with Homebrew"
-            : "Install Homebrew or use the AeroSpace manual installer",
+            ? `Install ${latestRelease?.version || "AeroSpace"} with Homebrew`
+            : latestRelease
+              ? `Download ${latestRelease.version} from the official GitHub release`
+              : "Latest release information is unavailable",
         status: installed ? "ready" : "action",
         markdown: installed
-          ? `## Installation Ready\n\n- CLI: \`${installation.binaryPath}\`\n- App: \`${installation.appPath}\`\n- Homebrew: ${brewPath ? `\`${brewPath}\`` : "Not required"}`
+          ? `## Installation Ready\n\n- CLI: \`${installation.binaryPath}\`\n- App: \`${installation.appPath}\`\n- Installed: **${installation.clientVersion || "Unknown"}**\n- Latest release: **${latestRelease?.version || "Unavailable"}**\n- Install method: ${brewManaged ? "Homebrew-managed" : "Local/manual"}\n\n${updateAvailable ? `A newer release is available. Updating is optional and does not affect setup readiness.${brewManaged ? "" : " Use the same method that originally installed AeroSpace to avoid duplicates."}` : "No update is required."}`
           : `## Installation Required\n\n${
               brewPath
-                ? "The extension can run the official Homebrew installation after you confirm."
-                : "Homebrew is not installed. Open the installation guide, install AeroSpace, then return and refresh."
-            }\n\nOfficial command:\n\n\`\`\`sh\nbrew install --cask nikitabobko/tap/aerospace\n\`\`\``,
+                ? "Recommended: let the extension run the official Homebrew cask after you confirm."
+                : latestRelease
+                  ? "Homebrew is unavailable. The extension can download the official GitHub release into your user Applications folder after you confirm."
+                  : `The release check is unavailable${releaseError ? `: ${releaseError}` : "."} No automatic installation will be attempted while the source cannot be verified.`
+            }\n\n- Latest release: **${latestRelease?.version || "Unavailable"}**\n- Download size: **${latestRelease ? formatBytes(latestRelease.size) : "Unknown"}**\n- Source: **nikitabobko/AeroSpace on GitHub**\n\nNothing downloads until you explicitly approve it.`,
       },
       {
         id: "configuration",
@@ -283,7 +461,7 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
             : configPaths.length > 1
               ? `${configPaths.length} configurations found; AeroSpace requires one`
               : installed
-                ? "Create the official default configuration"
+                ? "Choose recommended chat-app rules or the original defaults"
                 : "Install AeroSpace before creating its configuration",
         status: configStatus,
         markdown:
@@ -291,7 +469,7 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
             ? `## Configuration Ready\n\nUsing:\n\n\`${configPaths[0]}\`\n\nExisting rules are preserved. Automated repairs never overwrite this file.`
             : configPaths.length > 1
               ? `## Configuration Conflict\n\nAeroSpace searches these locations in order, but reports an ambiguity when both exist:\n\n${configPaths.map((path) => `- \`${path}\``).join("\n")}\n\nChoose which file to keep, back up the other, then refresh this check.`
-              : "## Create a Starter Configuration\n\nThe extension can copy `default-config.toml` from the installed AeroSpace app to `~/.aerospace.toml`.\n\nThe operation uses create-only semantics and will never overwrite a file.",
+              : "## Choose a Starter Configuration\n\n**Recommended** starts from AeroSpace’s official defaults and makes common chat apps float, preventing conversations from disrupting tiled work.\n\n**Original** copies AeroSpace’s defaults unchanged.\n\nBoth choices create `~/.aerospace.toml` only when no configuration exists. Existing files are never overwritten.",
       },
       {
         id: "service",
@@ -356,10 +534,12 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
       toast.title = "Done";
       toast.message = result.stdout || result.stderr || title;
       await refresh();
+      return true;
     } catch (error) {
       toast.style = Toast.Style.Failure;
       toast.title = `${title} Failed`;
       toast.message = error instanceof Error ? error.message : String(error);
+      return false;
     }
   };
 
@@ -431,34 +611,85 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
                             primaryAction: { title: repair ? "Repair" : "Install" },
                           });
                           if (confirmed)
-                            await runTask(repair ? "Repair AeroSpace" : "Install AeroSpace", () =>
-                              installAerospaceWithHomebrew(repair),
+                            await runProgressTask(
+                              repair ? "Repairing AeroSpace" : "Installing AeroSpace",
+                              (onProgress) => installAerospaceWithHomebrew(repair, onProgress),
+                              refresh,
+                            );
+                        }}
+                      />
+                    ) : snapshot?.latestRelease?.digest?.toLowerCase().startsWith("sha256:") ? (
+                      <Action
+                        title={`Download AeroSpace ${snapshot.latestRelease.version}`}
+                        icon={Icon.Download}
+                        onAction={async () => {
+                          const release = snapshot.latestRelease;
+                          if (!release) return;
+                          const confirmed = await confirmAlert({
+                            title: `Install AeroSpace ${release.version}?`,
+                            message: `Download ${formatBytes(release.size)} from the official nikitabobko/AeroSpace GitHub release, verify its SHA-256 checksum, then install AeroSpace.app in ~/Applications and the CLI in ~/.local/bin. macOS quarantine metadata will be removed so the official app can launch. No administrator password is used.`,
+                            primaryAction: { title: "Download and Install" },
+                          });
+                          if (confirmed)
+                            await runProgressTask(
+                              "Installing AeroSpace",
+                              (onProgress) => installLatestAeroSpaceDirect(release, onProgress),
+                              refresh,
                             );
                         }}
                       />
                     ) : (
                       <Action.OpenInBrowser
-                        title="Open Homebrew Installation"
-                        url="https://brew.sh/"
+                        title="Open Official AeroSpace Releases"
+                        url="https://github.com/nikitabobko/AeroSpace/releases"
                         icon={Icon.Globe}
                       />
                     )
+                  ) : null}
+                  {isInstallStep &&
+                  snapshot?.installation.appPath &&
+                  snapshot.installation.binaryPath &&
+                  snapshot.brewManaged &&
+                  snapshot.latestRelease &&
+                  snapshot.installation.clientVersion &&
+                  compareAeroSpaceVersions(
+                    snapshot.installation.clientVersion,
+                    snapshot.latestRelease.version,
+                  ) < 0 ? (
+                    <Action
+                      title={`Update to ${snapshot.latestRelease.version}`}
+                      icon={Icon.Download}
+                      onAction={async () => {
+                        const confirmed = await confirmAlert({
+                          title: `Update AeroSpace to ${snapshot.latestRelease?.version}?`,
+                          message:
+                            "This uses Homebrew and preserves your existing AeroSpace configuration.",
+                          primaryAction: { title: "Update" },
+                        });
+                        if (confirmed)
+                          await runProgressTask(
+                            "Updating AeroSpace",
+                            (onProgress) => updateAerospaceWithHomebrew(onProgress),
+                            refresh,
+                          );
+                      }}
+                    />
                   ) : null}
                   {isConfigStep &&
                   snapshot?.configPaths.length === 0 &&
                   snapshot.installation.appPath ? (
                     <Action
-                      title="Create Official Default Configuration"
+                      title="Choose Starter Configuration…"
                       icon={Icon.Document}
-                      onAction={async () => {
-                        const confirmed = await confirmAlert({
-                          title: "Create ~/.aerospace.toml?",
-                          message:
-                            "The file will be copied from AeroSpace.app. Existing files are never overwritten.",
-                          primaryAction: { title: "Create Configuration" },
-                        });
-                        if (confirmed) await runTask("Create Configuration", createDefaultConfig);
-                      }}
+                      onAction={() =>
+                        push(
+                          <ConfigurationChoiceForm
+                            onCreated={(profile) =>
+                              runTask("Create Configuration", () => createDefaultConfig(profile))
+                            }
+                          />,
+                        )
+                      }
                     />
                   ) : null}
                   {isConfigStep && snapshot?.configPaths.length ? (
@@ -501,8 +732,10 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
                           primaryAction: { title: "Repair" },
                         });
                         if (confirmed)
-                          await runTask("Repair AeroSpace", () =>
-                            installAerospaceWithHomebrew(true),
+                          await runProgressTask(
+                            "Repairing AeroSpace",
+                            (onProgress) => installAerospaceWithHomebrew(true, onProgress),
+                            refresh,
                           );
                       }}
                     />

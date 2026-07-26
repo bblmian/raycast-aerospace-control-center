@@ -1,14 +1,42 @@
 import { getApplications, getPreferenceValues } from "@raycast/api";
+import { createHash } from "crypto";
 import { constants } from "fs";
-import { access, copyFile, mkdir, readFile, readdir } from "fs/promises";
-import { homedir } from "os";
+import {
+  access,
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  open as openFile,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "fs/promises";
+import { homedir, tmpdir } from "os";
 import { basename, delimiter, dirname, join, resolve } from "path";
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
+import { parse } from "smol-toml";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
 
 export type CommandResult = { stdout: string; stderr: string };
+export type InstallationProgress = {
+  phase: "checking" | "downloading" | "verifying" | "extracting" | "installing" | "complete";
+  message: string;
+  percent?: number;
+};
+export type AeroSpaceRelease = {
+  version: string;
+  tag: string;
+  downloadUrl: string;
+  size: number;
+  digest: string | null;
+  publishedAt: string;
+  prerelease: boolean;
+};
+export type ConfigurationProfile = "recommended" | "official";
 export type ServiceState = "enabled" | "disabled" | "stopped" | "not-installed";
 export type WorkspaceInfo = {
   workspace: string;
@@ -40,6 +68,24 @@ const WINDOW_LIST_FORMAT =
   "%{window-id} %{app-name} %{app-bundle-id} %{window-title} %{workspace} %{monitor-id} %{monitor-name} %{window-layout}";
 const MONITOR_LIST_FORMAT =
   "%{monitor-id} %{monitor-name} %{monitor-appkit-nsscreen-screens-id} %{monitor-is-main}";
+
+const RECOMMENDED_FLOATING_BUNDLE_IDS = [
+  ["Messages", "com.apple.MobileSMS"],
+  ["FaceTime", "com.apple.FaceTime"],
+  ["Slack", "com.tinyspeck.slackmacgap"],
+  ["Discord", "com.hnc.Discord"],
+  ["Microsoft Teams", "com.microsoft.teams2"],
+  ["Microsoft Teams Classic", "com.microsoft.teams"],
+  ["WeChat", "com.tencent.xinWeChat"],
+  ["WeCom", "com.tencent.WeWorkMac"],
+  ["DingTalk", "com.alibaba.DingTalkMac"],
+  ["Telegram", "ru.keepcoder.Telegram"],
+  ["WhatsApp", "net.whatsapp.WhatsApp"],
+  ["Signal", "org.whispersystems.signal-desktop"],
+  ["ChatGPT", "com.openai.chat"],
+  ["ChatGPT", "com.openai.codex"],
+  ["Claude", "com.anthropic.claudefordesktop"],
+] as const;
 
 type Preferences = {
   aerospaceBinaryPath?: string;
@@ -142,6 +188,20 @@ export async function findHomebrewBinary(): Promise<string | null> {
   return null;
 }
 
+export async function isAeroSpaceManagedByHomebrew(): Promise<boolean> {
+  const brew = await findHomebrewBinary();
+  if (!brew) return false;
+  try {
+    await execFileAsync(brew, ["list", "--cask", "aerospace"], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function findAerospaceApp(refresh = false): Promise<string | null> {
   if (!refresh && appCache !== undefined) return appCache;
 
@@ -184,26 +244,273 @@ export async function aerospace(args: string[]): Promise<CommandResult> {
   return { stdout: stdout.trim(), stderr: stderr.trim() };
 }
 
-export async function installAerospaceWithHomebrew(reinstall = false): Promise<CommandResult> {
+async function runProcessWithProgress(
+  command: string,
+  args: string[],
+  onProgress?: (progress: InstallationProgress) => void,
+): Promise<CommandResult> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    const report = (chunk: Buffer, stream: "stdout" | "stderr") => {
+      const text = chunk.toString();
+      if (stream === "stdout") stdout += text;
+      else stderr += text;
+      const message = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1);
+      if (message) onProgress?.({ phase: "installing", message });
+    };
+
+    child.stdout.on("data", (chunk: Buffer) => report(chunk, "stdout"));
+    child.stderr.on("data", (chunk: Buffer) => report(chunk, "stderr"));
+    child.on("error", rejectPromise);
+    child.on("close", (code) => {
+      const result = { stdout: stdout.trim(), stderr: stderr.trim() };
+      if (code === 0) resolvePromise(result);
+      else
+        rejectPromise(
+          new Error(
+            result.stderr ||
+              result.stdout ||
+              `${basename(command)} exited with status ${code ?? "unknown"}.`,
+          ),
+        );
+    });
+  });
+}
+
+function clearInstallationCaches() {
+  binaryCache = undefined;
+  appCache = undefined;
+  configCache = undefined;
+}
+
+export async function installAerospaceWithHomebrew(
+  reinstall = false,
+  onProgress?: (progress: InstallationProgress) => void,
+): Promise<CommandResult> {
   const brew = await findHomebrewBinary();
   if (!brew) {
     throw new Error(
       "Homebrew was not found. Install Homebrew first, then return to Setup & Repair.",
     );
   }
-  const { stdout, stderr } = await execFileAsync(
+  onProgress?.({
+    phase: "checking",
+    message: reinstall ? "Preparing Homebrew repair…" : "Preparing Homebrew installation…",
+  });
+  const result = await runProcessWithProgress(
     brew,
     [reinstall ? "reinstall" : "install", "--cask", "nikitabobko/tap/aerospace"],
+    onProgress,
+  );
+  clearInstallationCaches();
+  onProgress?.({ phase: "complete", message: "AeroSpace installation completed.", percent: 100 });
+  return result;
+}
+
+export async function updateAerospaceWithHomebrew(
+  onProgress?: (progress: InstallationProgress) => void,
+): Promise<CommandResult> {
+  const brew = await findHomebrewBinary();
+  if (!brew)
+    throw new Error("Homebrew was not found, so this installation cannot be updated here.");
+  onProgress?.({ phase: "checking", message: "Checking the Homebrew cask…" });
+  const result = await runProcessWithProgress(
+    brew,
+    ["upgrade", "--cask", "nikitabobko/tap/aerospace"],
+    onProgress,
+  );
+  clearInstallationCaches();
+  onProgress?.({ phase: "complete", message: "AeroSpace update completed.", percent: 100 });
+  return result;
+}
+
+export async function getLatestAeroSpaceRelease(): Promise<AeroSpaceRelease> {
+  const response = await fetch(
+    "https://api.github.com/repos/nikitabobko/AeroSpace/releases?per_page=10",
     {
-      encoding: "utf8",
-      maxBuffer: 20 * 1024 * 1024,
-      timeout: 15 * 60 * 1000,
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "raycast-aerospace-control-center",
+      },
     },
   );
-  binaryCache = undefined;
-  appCache = undefined;
-  configCache = undefined;
-  return { stdout: stdout.trim(), stderr: stderr.trim() };
+  if (!response.ok) {
+    throw new Error(`GitHub release check failed (${response.status}).`);
+  }
+
+  type GitHubAsset = {
+    name: string;
+    browser_download_url: string;
+    size: number;
+    digest?: string | null;
+    updated_at: string;
+  };
+  type GitHubRelease = {
+    tag_name: string;
+    draft: boolean;
+    prerelease: boolean;
+    published_at: string;
+    assets: GitHubAsset[];
+  };
+  const releases = (await response.json()) as GitHubRelease[];
+  for (const release of releases) {
+    if (release.draft) continue;
+    const asset = release.assets.find((candidate) => /^AeroSpace-v.+\.zip$/i.test(candidate.name));
+    if (!asset) continue;
+    return {
+      version: release.tag_name.replace(/^v/, ""),
+      tag: release.tag_name,
+      downloadUrl: asset.browser_download_url,
+      size: asset.size,
+      digest: asset.digest || null,
+      publishedAt: release.published_at || asset.updated_at,
+      prerelease: release.prerelease,
+    };
+  }
+  throw new Error("No downloadable AeroSpace release was found on the official GitHub repository.");
+}
+
+function numericVersion(version: string): number[] {
+  return (version.match(/\d+/g) || []).slice(0, 4).map(Number);
+}
+
+export function compareAeroSpaceVersions(local: string | null, remote: string | null): number {
+  if (!local || !remote) return 0;
+  const left = numericVersion(local);
+  const right = numericVersion(remote);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] || 0) - (right[index] || 0);
+    if (difference !== 0) return Math.sign(difference);
+  }
+  return 0;
+}
+
+export async function installLatestAeroSpaceDirect(
+  release: AeroSpaceRelease,
+  onProgress?: (progress: InstallationProgress) => void,
+): Promise<CommandResult> {
+  if (!release.digest?.toLowerCase().startsWith("sha256:")) {
+    throw new Error(
+      "The official release did not provide a SHA-256 digest. Direct installation was stopped; use Homebrew or install it manually.",
+    );
+  }
+  if ((await findAerospaceApp(true)) || (await findAerospaceBinary(true))) {
+    throw new Error(
+      "An AeroSpace installation already exists. Direct download is disabled to prevent duplicate installations; use its original update method instead.",
+    );
+  }
+
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "raycast-aerospace-"));
+  const archivePath = join(temporaryRoot, "AeroSpace.zip");
+  const extractionPath = join(temporaryRoot, "extracted");
+  const userApplications = join(homedir(), "Applications");
+  const userBin = join(homedir(), ".local", "bin");
+  const destinationApp = join(userApplications, "AeroSpace.app");
+  const destinationBinary = join(userBin, "aerospace");
+  let createdApp = false;
+  let createdBinary = false;
+
+  try {
+    onProgress?.({ phase: "downloading", message: `Downloading AeroSpace ${release.version}…` });
+    const response = await fetch(release.downloadUrl, {
+      headers: { "User-Agent": "raycast-aerospace-control-center" },
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`Official download failed (${response.status}).`);
+    }
+
+    const handle = await openFile(archivePath, "wx");
+    const hash = createHash("sha256");
+    const reader = response.body.getReader() as unknown as {
+      read: () => Promise<{ done: boolean; value?: Uint8Array }>;
+    };
+    let received = 0;
+    let streamDone = false;
+    try {
+      while (!streamDone) {
+        const result = await reader.read();
+        streamDone = result.done;
+        if (result.done) continue;
+        if (!result.value) throw new Error("The official download stream ended unexpectedly.");
+        const chunk = Buffer.from(result.value);
+        await handle.write(chunk);
+        hash.update(chunk);
+        received += chunk.length;
+        const percent = release.size
+          ? Math.min(100, Math.round((received / release.size) * 100))
+          : undefined;
+        onProgress?.({
+          phase: "downloading",
+          message: percent
+            ? `Downloading official release… ${percent}%`
+            : "Downloading official release…",
+          percent,
+        });
+      }
+    } finally {
+      await handle.close();
+    }
+
+    onProgress?.({ phase: "verifying", message: "Verifying the official SHA-256 checksum…" });
+    const actualDigest = hash.digest("hex");
+    const expectedDigest = release.digest?.replace(/^sha256:/i, "");
+    if (expectedDigest && actualDigest.toLowerCase() !== expectedDigest.toLowerCase()) {
+      throw new Error("The downloaded archive failed SHA-256 verification and was not installed.");
+    }
+
+    await mkdir(extractionPath, { recursive: true });
+    onProgress?.({ phase: "extracting", message: "Extracting the signed AeroSpace package…" });
+    await execFileAsync("/usr/bin/ditto", ["-x", "-k", archivePath, extractionPath]);
+    const extractedEntries = await readdir(extractionPath);
+    const releaseDirectory = extractedEntries.find((entry) => entry.startsWith("AeroSpace-v"));
+    if (!releaseDirectory) throw new Error("The official archive has an unexpected structure.");
+    const sourceRoot = join(extractionPath, releaseDirectory);
+    const sourceApp = join(sourceRoot, "AeroSpace.app");
+    const sourceBinary = join(sourceRoot, "bin", "aerospace");
+    if (
+      !(await isReadable(join(sourceApp, "Contents", "Info.plist"))) ||
+      !(await canExecute(sourceBinary))
+    ) {
+      throw new Error("The official archive does not contain a valid AeroSpace app and CLI.");
+    }
+    if ((await isReadable(destinationApp)) || (await isReadable(destinationBinary))) {
+      throw new Error("A destination file appeared during installation. Nothing was overwritten.");
+    }
+
+    await mkdir(userApplications, { recursive: true });
+    await mkdir(userBin, { recursive: true });
+    onProgress?.({ phase: "installing", message: "Installing in your user Applications folder…" });
+    await execFileAsync("/usr/bin/ditto", [sourceApp, destinationApp]);
+    createdApp = true;
+    await copyFile(sourceBinary, destinationBinary, constants.COPYFILE_EXCL);
+    createdBinary = true;
+    await chmod(destinationBinary, 0o755);
+    await execFileAsync("/usr/bin/xattr", ["-dr", "com.apple.quarantine", destinationApp]);
+    clearInstallationCaches();
+    onProgress?.({
+      phase: "complete",
+      message: `AeroSpace ${release.version} installed.`,
+      percent: 100,
+    });
+    return {
+      stdout: `Installed AeroSpace ${release.version} in ${destinationApp} and ${destinationBinary}.`,
+      stderr: "",
+    };
+  } catch (error) {
+    if (createdBinary) await rm(destinationBinary, { force: true });
+    if (createdApp) await rm(destinationApp, { recursive: true, force: true });
+    clearInstallationCaches();
+    throw error;
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
 }
 
 export async function existingConfigPaths(): Promise<string[]> {
@@ -223,7 +530,9 @@ export async function existingConfigPaths(): Promise<string[]> {
   return existing;
 }
 
-export async function createDefaultConfig(): Promise<CommandResult> {
+export async function createDefaultConfig(
+  profile: ConfigurationProfile = "official",
+): Promise<CommandResult> {
   const existing = await existingConfigPaths();
   if (existing.length > 0) {
     return { stdout: `Configuration already exists at ${existing[0]}`, stderr: "" };
@@ -235,11 +544,32 @@ export async function createDefaultConfig(): Promise<CommandResult> {
   if (!(await isReadable(source))) {
     throw new Error(`The installed AeroSpace app does not contain ${source}.`);
   }
+  let content = await readFile(source, "utf8");
+  if (profile === "recommended") {
+    const rules = RECOMMENDED_FLOATING_BUNDLE_IDS.map(
+      ([name, bundleId]) =>
+        `  # ${name}\n  { if = 'test %{app-bundle-id} = ${bundleId}', run = 'layout floating' },`,
+    ).join("\n");
+    const block = `# Raycast AeroSpace Control Center — recommended chat-app behavior\n# These apps float by default so conversations do not disturb the tiled workspace.\non-window-detected = [\n${rules}\n]\n\n`;
+    const firstTable = content.search(/^\s*\[/m);
+    content =
+      firstTable >= 0
+        ? `${content.slice(0, firstTable)}${block}${content.slice(firstTable)}`
+        : `${content}\n${block}`;
+    parse(content);
+  }
+
   const destination = join(homedir(), ".aerospace.toml");
   await mkdir(dirname(destination), { recursive: true });
-  await copyFile(source, destination, constants.COPYFILE_EXCL);
+  await writeFile(destination, content, { encoding: "utf8", flag: "wx" });
   configCache = destination;
-  return { stdout: `Created ${destination} from AeroSpace's official default config.`, stderr: "" };
+  return {
+    stdout:
+      profile === "recommended"
+        ? `Created ${destination} with the official defaults plus floating rules for common chat apps.`
+        : `Created ${destination} from AeroSpace's official default config.`,
+    stderr: "",
+  };
 }
 
 export async function jsonCommand<T>(args: string[]): Promise<T> {

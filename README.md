@@ -30,8 +30,10 @@ are required for a standard installation.
 ## Features
 
 - Guided first-run setup with installation, configuration, service, version, and permission checks
-- User-confirmed one-click AeroSpace installation or repair through Homebrew
-- Safe starter configuration creation from AeroSpace's bundled official default
+- User-confirmed AeroSpace installation through Homebrew, with live progress
+- Verified direct download from official GitHub releases when Homebrew is unavailable
+- Local-versus-latest version checks and optional Homebrew-managed updates
+- Safe starter configuration choice: original defaults or recommended chat-app floating rules
 - Start, pause, resume, quit, and reload AeroSpace
 - Browse, search, and focus windows across every workspace
 - Move windows between workspaces and monitors
@@ -74,11 +76,25 @@ confirmation. Configuration creation uses create-only semantics and never
 overwrites an existing file. Ambiguous or invalid user configurations are
 opened for review instead of being rewritten automatically.
 
+Homebrew remains the preferred installation method. If Homebrew is unavailable,
+the assistant can download an official AeroSpace release to
+`~/Applications/AeroSpace.app`, install its CLI in `~/.local/bin`, and verify the
+SHA-256 digest published with the GitHub release. Direct installation is refused
+when AeroSpace already exists or when a release has no SHA-256 digest.
+
+The recommended starter profile begins with the configuration bundled inside
+the installed AeroSpace app, then adds `on-window-detected` rules that float
+common communication apps such as Messages, Slack, Teams, WeChat, WeCom,
+DingTalk, Telegram, WhatsApp, Signal, ChatGPT, and Claude. The original profile
+copies AeroSpace's bundled defaults unchanged.
+
 Before showing first-run setup, the extension checks whether AeroSpace.app, the
 CLI, and exactly one configuration are already available. A complete setup is
 accepted automatically, including when the AeroSpace service is intentionally
 paused or stopped. Opening **Setup & Repair** later shows a read-only health
-summary; re-entering the full wizard requires a separate confirmation.
+summary; re-entering the full wizard requires a separate confirmation. An
+available update is shown separately and never marks a working setup as
+incomplete.
 
 AeroSpace itself needs macOS Accessibility permission to manage windows. This
 extension does not request additional system permissions.
