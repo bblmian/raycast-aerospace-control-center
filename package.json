@@ -55,6 +55,21 @@
       ]
     },
     {
+      "name": "setup",
+      "title": "Setup & Repair",
+      "subtitle": "AeroSpace",
+      "description": "Detect, install, configure, validate, and repair AeroSpace",
+      "mode": "view",
+      "keywords": [
+        "onboarding",
+        "install",
+        "diagnose",
+        "初始化",
+        "安装",
+        "修复"
+      ]
+    },
+    {
       "name": "switch-window",
       "title": "Switch Window",
       "subtitle": "AeroSpace",

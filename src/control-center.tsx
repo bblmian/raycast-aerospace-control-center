@@ -8,6 +8,7 @@ import {
   Keyboard,
   LaunchType,
   List,
+  LocalStorage,
   Toast,
   confirmAlert,
   getApplications,
@@ -41,6 +42,7 @@ import {
 } from "./utils/aerospace";
 import { readWindowRule, saveWindowRule } from "./utils/rules";
 import { coloredIcon, PALETTE } from "./utils/theme";
+import { SETUP_COMPLETE_KEY, SetupWizard } from "./setup";
 
 async function run(
   title: string,
@@ -1201,7 +1203,8 @@ export default function ControlCenter() {
   const [stateLabel, setStateLabel] = useState("Detecting…");
   const [configPath, setConfigPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const { push } = useNavigation();
+  const [setupMode, setSetupMode] = useState<"checking" | "show" | "hidden">("checking");
+  const { pop, push } = useNavigation();
 
   const refresh = async () => {
     setLoading(true);
@@ -1213,6 +1216,9 @@ export default function ControlCenter() {
   };
   useEffect(() => {
     refresh();
+    LocalStorage.getItem<string>(SETUP_COMPLETE_KEY)
+      .then((value) => setSetupMode(value === "true" ? "hidden" : "show"))
+      .catch(() => setSetupMode("show"));
   }, []);
 
   const serviceAction =
@@ -1232,6 +1238,13 @@ export default function ControlCenter() {
         : state === "not-installed"
           ? "Set up installation paths or install AeroSpace"
           : "Start the app and restore window management";
+
+  if (setupMode === "checking") {
+    return <List isLoading navigationTitle="AeroSpace Control Center" />;
+  }
+  if (setupMode === "show") {
+    return <SetupWizard onExit={() => setSetupMode("hidden")} />;
+  }
 
   return (
     <List
@@ -1392,6 +1405,20 @@ export default function ControlCenter() {
         />
       </List.Section>
       <List.Section title="Advanced" subtitle="Diagnostics and power tools">
+        <List.Item
+          icon={coloredIcon(Icon.WrenchScrewdriver, PALETTE.teal)}
+          title="Setup & Repair"
+          subtitle="Run guided installation, configuration, and compatibility checks"
+          actions={
+            <ActionPanel>
+              <Action
+                title="Open Setup & Repair"
+                icon={Icon.WrenchScrewdriver}
+                onAction={() => push(<SetupWizard onExit={pop} />)}
+              />
+            </ActionPanel>
+          }
+        />
         <List.Item
           icon={coloredIcon(Icon.Heartbeat, PALETTE.green)}
           title="Compatibility Check"

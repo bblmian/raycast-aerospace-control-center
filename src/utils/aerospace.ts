@@ -1,8 +1,8 @@
 import { getApplications, getPreferenceValues } from "@raycast/api";
 import { constants } from "fs";
-import { access, readFile, readdir } from "fs/promises";
+import { access, copyFile, mkdir, readFile, readdir } from "fs/promises";
 import { homedir } from "os";
-import { basename, delimiter, join, resolve } from "path";
+import { basename, delimiter, dirname, join, resolve } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 
@@ -131,6 +131,17 @@ export async function findAerospaceBinary(refresh = false): Promise<string | nul
   return null;
 }
 
+export async function findHomebrewBinary(): Promise<string | null> {
+  const pathCandidates = (process.env.PATH || "")
+    .split(delimiter)
+    .filter(Boolean)
+    .map((path) => join(path, "brew"));
+  for (const candidate of [...pathCandidates, "/opt/homebrew/bin/brew", "/usr/local/bin/brew"]) {
+    if (await canExecute(candidate)) return candidate;
+  }
+  return null;
+}
+
 export async function findAerospaceApp(refresh = false): Promise<string | null> {
   if (!refresh && appCache !== undefined) return appCache;
 
@@ -171,6 +182,64 @@ export async function aerospace(args: string[]): Promise<CommandResult> {
     maxBuffer: 10 * 1024 * 1024,
   });
   return { stdout: stdout.trim(), stderr: stderr.trim() };
+}
+
+export async function installAerospaceWithHomebrew(reinstall = false): Promise<CommandResult> {
+  const brew = await findHomebrewBinary();
+  if (!brew) {
+    throw new Error(
+      "Homebrew was not found. Install Homebrew first, then return to Setup & Repair.",
+    );
+  }
+  const { stdout, stderr } = await execFileAsync(
+    brew,
+    [reinstall ? "reinstall" : "install", "--cask", "nikitabobko/tap/aerospace"],
+    {
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+      timeout: 15 * 60 * 1000,
+    },
+  );
+  binaryCache = undefined;
+  appCache = undefined;
+  configCache = undefined;
+  return { stdout: stdout.trim(), stderr: stderr.trim() };
+}
+
+export async function existingConfigPaths(): Promise<string[]> {
+  const configured = preferences().aerospaceConfigPath?.trim();
+  const xdgRoot = process.env.XDG_CONFIG_HOME?.trim()
+    ? expandPath(process.env.XDG_CONFIG_HOME)
+    : join(homedir(), ".config");
+  const candidates = [
+    ...(configured ? [expandPath(configured)] : []),
+    join(homedir(), ".aerospace.toml"),
+    join(xdgRoot, "aerospace", "aerospace.toml"),
+  ];
+  const existing: string[] = [];
+  for (const candidate of [...new Set(candidates)]) {
+    if (await isReadable(candidate)) existing.push(candidate);
+  }
+  return existing;
+}
+
+export async function createDefaultConfig(): Promise<CommandResult> {
+  const existing = await existingConfigPaths();
+  if (existing.length > 0) {
+    return { stdout: `Configuration already exists at ${existing[0]}`, stderr: "" };
+  }
+  const app = await findAerospaceApp(true);
+  if (!app) throw new Error("AeroSpace.app is required before creating its default configuration.");
+
+  const source = join(app, "Contents", "Resources", "default-config.toml");
+  if (!(await isReadable(source))) {
+    throw new Error(`The installed AeroSpace app does not contain ${source}.`);
+  }
+  const destination = join(homedir(), ".aerospace.toml");
+  await mkdir(dirname(destination), { recursive: true });
+  await copyFile(source, destination, constants.COPYFILE_EXCL);
+  configCache = destination;
+  return { stdout: `Created ${destination} from AeroSpace's official default config.`, stderr: "" };
 }
 
 export async function jsonCommand<T>(args: string[]): Promise<T> {
