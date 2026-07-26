@@ -1,8 +1,8 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "aerospace-control-center",
-  "title": "Aerospace Control Center",
-  "description": "Control AeroSpace windows, workspaces, layouts, monitors, and service state",
+  "title": "AeroSpace Control Center",
+  "description": "Install, configure, and visually control AeroSpace windows, workspaces, monitors, layouts, and service state",
   "icon": "extension-icon.png",
   "author": "bblmian",
   "categories": [

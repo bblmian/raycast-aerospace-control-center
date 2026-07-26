@@ -1,4 +1,4 @@
-# Aerospace Control Center Changelog
+# AeroSpace Control Center Changelog
 
 ## [Initial Release] - {PR_MERGE_DATE}
 

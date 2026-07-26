@@ -1,4 +1,4 @@
-# Aerospace Control Center
+# AeroSpace Control Center
 
 A comprehensive Raycast interface for the
 [AeroSpace](https://github.com/nikitabobko/AeroSpace) tiling window manager.
@@ -24,7 +24,7 @@ The extension automatically detects:
 - `$XDG_CONFIG_HOME/aerospace/aerospace.toml`
 
 For non-standard installations, set the CLI, application, or configuration path
-in Raycast Preferences → Extensions → Aerospace Control Center. No preferences
+in Raycast Preferences → Extensions → AeroSpace Control Center. No preferences
 are required for a standard installation.
 
 ## Features
