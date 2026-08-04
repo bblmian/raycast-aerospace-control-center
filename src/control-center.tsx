@@ -37,6 +37,7 @@ import {
   listWorkspaces,
   quitAerospace,
   reloadAerospace,
+  resumeAeroSpaceNow,
   resolveConfigPath,
   splitArguments,
   startAerospace,
@@ -48,14 +49,18 @@ import { SETUP_COMPLETE_KEY, SetupGate, checkSetupReadiness } from "./setup";
 import { CommonShortcuts } from "./browse-shortcuts";
 import { PauseAeroSpaceForm } from "./pause-aerospace";
 
-async function run(title: string, task: () => Promise<{ stdout: string; stderr: string }>, onDone?: () => void) {
+async function run(
+  title: string,
+  task: () => Promise<{ stdout: string; stderr: string }>,
+  onDone?: () => void | Promise<void>,
+) {
   const toast = await showToast({ style: Toast.Style.Animated, title });
   try {
     const result = await task();
     toast.style = Toast.Style.Success;
     toast.title = "Done";
     toast.message = result.stdout || result.stderr || title;
-    onDone?.();
+    await onDone?.();
   } catch (error) {
     toast.style = Toast.Style.Failure;
     toast.title = "Command Failed";
@@ -952,9 +957,16 @@ export default function ControlCenter() {
           }
           actions={
             <ActionPanel>
+              {pauseSchedule ? (
+                <Action
+                  title="Resume Now and Cancel Scheduled Pause"
+                  icon={Icon.Play}
+                  onAction={() => run("Resuming AeroSpace", resumeAeroSpaceNow, refresh)}
+                />
+              ) : null}
               <Action
-                title={pauseSchedule ? "Review Scheduled Pause" : "Pause AeroSpace for Days"}
-                icon={Icon.Pause}
+                title={pauseSchedule ? "Change Pause Schedule" : "Pause AeroSpace for Days"}
+                icon={pauseSchedule ? Icon.Clock : Icon.Pause}
                 onAction={() => push(<PauseAeroSpaceForm onComplete={refresh} />)}
               />
             </ActionPanel>

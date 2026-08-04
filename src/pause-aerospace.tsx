@@ -65,12 +65,24 @@ export function PauseAeroSpaceForm({ onComplete }: { onComplete?: () => void }) 
       navigationTitle="Pause AeroSpace for Days"
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="Pause and Schedule Resume" icon={Icon.Pause} onSubmit={pause} />
-          {schedule ? <Action title="Resume Now" icon={Icon.Play} onAction={resume} /> : null}
+          {schedule ? (
+            <Action title="Resume Now and Cancel Scheduled Pause" icon={Icon.Play} onAction={resume} />
+          ) : null}
+          <Action.SubmitForm
+            title={schedule ? "Replace with New Pause Schedule" : "Pause and Schedule Resume"}
+            icon={Icon.Pause}
+            onSubmit={pause}
+          />
         </ActionPanel>
       }
     >
       <Form.Description title="Current Status" text={scheduleDescription(schedule)} />
+      {schedule ? (
+        <Form.Description
+          title="Resume Immediately"
+          text="Press Enter to cancel this scheduled pause, remove its background resume task, and restore AeroSpace window management now."
+        />
+      ) : null}
       <Form.Separator />
       <Form.Dropdown id="duration" title="Pause Duration" value={duration} onChange={setDuration}>
         <Form.Dropdown.Item value="1" title="1 Day" />

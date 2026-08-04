@@ -754,6 +754,7 @@ export async function toggleAerospace(): Promise<CommandResult> {
     await aerospace(["enable", "off"]);
     return { stdout: "AeroSpace paused", stderr: "" };
   }
+  if (await getPauseSchedule()) return resumeAeroSpaceNow();
   return startAerospace();
 }
 

@@ -11,6 +11,8 @@ assert.match(theme, /tintColor: Color\.PrimaryText/);
 assert.doesNotMatch(theme, /grid-icons\//);
 assert.doesNotMatch(controlCenter, /columns=\{(?:6|7|8)\}/);
 assert.doesNotMatch(controlCenter, /QuickCommandsView|QUICK_COMMANDS/);
+assert.match(controlCenter, /Resume Now and Cancel Scheduled Pause/);
+assert.match(controlCenter, /resumeAeroSpaceNow/);
 
 const controlSections = [...controlCenter.matchAll(/<Grid\.Section[\s\S]*?columns=\{([^}]+)\}/g)];
 assert.ok(controlSections.length >= 4, "expected the Control Center grid sections");
