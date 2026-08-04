@@ -32,6 +32,7 @@ import {
   installAerospaceWithHomebrew,
   isAeroSpaceManagedByHomebrew,
   reloadAerospace,
+  restartAerospace,
   startAerospace,
   updateAerospaceWithHomebrew,
 } from "./utils/aerospace";
@@ -124,6 +125,9 @@ export async function checkSetupReadiness(): Promise<SetupReadiness> {
   if (!installation.binaryPath) reasons.push("The aerospace CLI is not available.");
   if (configPaths.length === 0) reasons.push("No custom AeroSpace configuration was found.");
   if (configPaths.length > 1) reasons.push("Multiple AeroSpace configurations create an ambiguous setup.");
+  if (installation.issues.some((issue) => issue.includes("older background service"))) {
+    reasons.push("AeroSpace was updated, but its older background service still needs to be restarted.");
+  }
   if (
     installation.clientVersion &&
     installation.serverVersion &&
@@ -478,7 +482,7 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
         markdown: `## Compatibility\n\n- CLI version: **${installation.clientVersion || "Unknown"}**\n- App version: **${installation.serverVersion || "Not running"}**\n\n${
           versionsMatch
             ? "The CLI and running application use the same version."
-            : "If versions differ, reinstall AeroSpace with Homebrew and restart the application."
+            : "If the installed CLI and running application differ, restart AeroSpace to activate the update. Reinstallation is not required."
         }`,
       },
       {
@@ -685,23 +689,24 @@ export function SetupWizard({ onExit = popToRoot }: { onExit?: () => void }) {
                     />
                   ) : null}
                   {isCompatibilityStep &&
-                  snapshot?.brewPath &&
-                  snapshot.installation.clientVersion &&
-                  snapshot.installation.serverVersion &&
-                  snapshot.installation.clientVersion !== snapshot.installation.serverVersion ? (
+                  (snapshot?.installation.issues.some((issue) => issue.includes("older background service")) ||
+                    (snapshot?.installation.clientVersion &&
+                      snapshot.installation.serverVersion &&
+                      snapshot.installation.clientVersion !== snapshot.installation.serverVersion)) ? (
                     <Action
-                      title="Repair with Homebrew"
-                      icon={Icon.WrenchScrewdriver}
+                      title="Restart AeroSpace and Verify"
+                      icon={Icon.RotateClockwise}
                       onAction={async () => {
                         const confirmed = await confirmAlert({
-                          title: "Repair AeroSpace?",
-                          message: "This runs the official Homebrew installation and may update AeroSpace.",
-                          primaryAction: { title: "Repair" },
+                          title: "Restart AeroSpace?",
+                          message:
+                            "The installed update is ready, but the older background service is still running. Restarting activates the new version without reinstalling or changing your configuration.",
+                          primaryAction: { title: "Restart" },
                         });
                         if (confirmed)
                           await runProgressTask(
-                            "Repairing AeroSpace",
-                            (onProgress) => installAerospaceWithHomebrew(true, onProgress),
+                            "Restarting AeroSpace",
+                            (onProgress) => restartAerospace(onProgress),
                             refresh,
                           );
                       }}

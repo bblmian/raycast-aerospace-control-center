@@ -80,9 +80,24 @@ export default function Command() {
           }}
         />
         <MenuBarExtra.Item
-          icon={coloredIcon(Icon.AppWindow, PALETTE.indigo)}
-          title="Toggle Focused Window Floating / Tiling"
-          onAction={() => execute(() => aerospace(["layout", "floating", "tiling"]))}
+          icon={coloredIcon(Icon.Pause, PALETTE.amber)}
+          title="Pause AeroSpace for Days…"
+          onAction={() =>
+            launchCommand({
+              name: "pause-aerospace",
+              type: LaunchType.UserInitiated,
+            })
+          }
+        />
+        <MenuBarExtra.Item
+          icon={coloredIcon(Icon.Keyboard, PALETTE.indigo)}
+          title="Common Shortcuts…"
+          onAction={() =>
+            launchCommand({
+              name: "browse-shortcuts",
+              type: LaunchType.UserInitiated,
+            })
+          }
         />
         <MenuBarExtra.Item
           icon={coloredIcon(Icon.RotateClockwise, PALETTE.blue)}

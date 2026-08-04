@@ -1,4 +1,4 @@
-import { Icon } from "@raycast/api";
+import { Color, Grid, Icon } from "@raycast/api";
 
 export const PALETTE = {
   slate: "#8290A3",
@@ -11,19 +11,9 @@ export const PALETTE = {
   secondary: "#858A93",
 };
 
-export const NEON = {
-  blue: "#27D3FF",
-  purple: "#B56CFF",
-  cyan: "#27F0D2",
-  green: "#48F08B",
-  yellow: "#FFD85A",
-  orange: "#FF9D4D",
-  pink: "#FF63B4",
-  red: "#FF667A",
-};
-
-export function coloredIcon(source: Icon, tintColor: string) {
-  return { source, tintColor };
+export function coloredIcon(source: Icon, tintColor?: string) {
+  void tintColor; // Legacy callers keep their semantic status input; rendering is intentionally monochrome.
+  return { source, tintColor: Color.PrimaryText };
 }
 
 export type CompactGridIcon =
@@ -36,6 +26,7 @@ export type CompactGridIcon =
   | "maintenance"
   | "menu-bar"
   | "monitor"
+  | "pause"
   | "power"
   | "reload"
   | "resize"
@@ -45,10 +36,20 @@ export type CompactGridIcon =
   | "terminal"
   | "tools"
   | "window"
-  | "workspaces";
+  | "workspaces"
+  | "keyboard";
 
-export type CompactGridColor = keyof typeof NEON;
+/**
+ * Raycast renders a built-in Icon as a large Grid glyph and doesn't expose a
+ * per-item icon-size prop. These theme-tinted template assets use their own
+ * optical safe area, so the Grid must not apply another inset. Their artwork
+ * is compensated for Raycast centering the 256px image in the 100px column
+ * box, while the visible rounded tile occupies the top-left 91px. Keep that
+ * geometry locked with scripts/test-grid-icons.mjs.
+ */
+export const CONTROL_GRID_COLUMNS = 8;
+export const CONTROL_GRID_INSET = Grid.Inset.Zero;
 
-export function compactGridIcon(source: CompactGridIcon, color: CompactGridColor) {
-  return { source: `grid-icons/${source}-${color}.png` };
+export function compactGridIcon(source: CompactGridIcon) {
+  return { source: `grid-templates/${source}.png`, tintColor: Color.PrimaryText };
 }
