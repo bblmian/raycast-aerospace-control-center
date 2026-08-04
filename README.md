@@ -24,10 +24,6 @@ configuration work.
 
 ![AeroSpace workspace overview](media/workspaces.png)
 
-### Quick Actions
-
-![AeroSpace quick actions](media/quick-actions.png)
-
 ## Requirements
 
 - macOS
@@ -65,7 +61,8 @@ are required for a standard installation.
 - Switch, summon, balance, and flatten workspaces
 - Change tiling, floating, accordion, split, fullscreen, and window size
 - Save persistent floating and workspace rules for applications
-- Browse and execute shortcuts from the active AeroSpace configuration
+- Choose a personal **Common Shortcuts** menu from shortcuts that actually exist in the active AeroSpace configuration
+- Pause AeroSpace for 1–365 days with an automatic local resume schedule that survives logout, restart, and sleep
 - Run any AeroSpace CLI subcommand without shell interpolation
 - Check detected paths, client/server versions, and compatibility issues
 - Optional menu bar status and quick controls
@@ -83,10 +80,11 @@ must be edited manually.
 - **Switch Window** — search and focus any AeroSpace window
 - **Switch Workspace** — switch or manage workspaces
 - **Toggle AeroSpace** — start, pause, or resume without opening a view
+- **Pause AeroSpace for Days** — pause for a chosen period and resume automatically
 - **Toggle Floating Window** — toggle the focused window between floating and tiling
 - **Reload Configuration** — reload the active configuration
 - **Menu Bar Control** — persistent status, workspaces, and quick actions
-- **Browse Shortcuts** — inspect and execute configured shortcuts
+- **Common Shortcuts** — choose and run favorite bindings from the active configuration
 
 ## Troubleshooting
 
@@ -100,6 +98,12 @@ The setup assistant never installs software or writes a configuration without
 confirmation. Configuration creation uses create-only semantics and never
 overwrites an existing file. Ambiguous or invalid user configurations are
 opened for review instead of being rewritten automatically.
+
+The scheduled-pause feature stores a small local schedule and installs a
+per-user background resume task. It checks every five minutes, enables
+AeroSpace after the selected date, and then removes its own schedule files. It
+does not modify the AeroSpace configuration. Resuming manually clears the
+schedule only after AeroSpace has started successfully.
 
 Homebrew remains the preferred installation method. If Homebrew is unavailable,
 the assistant can download an official AeroSpace release to
@@ -130,6 +134,11 @@ extension does not request additional system permissions.
 npm install
 npm run dev
 ```
+
+When changing the Control Center tiles, follow the measured sizing and optical
+alignment contract in [`docs/grid-icon-guidelines.md`](docs/grid-icon-guidelines.md).
+Its automated tests prevent individual icons, Grid sections, and insets from
+drifting apart again.
 
 ## License
 

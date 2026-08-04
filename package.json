@@ -109,6 +109,20 @@
       ]
     },
     {
+      "name": "pause-aerospace",
+      "title": "Pause AeroSpace for Days",
+      "subtitle": "AeroSpace",
+      "description": "Pause automatic window management and schedule it to resume after a chosen number of days",
+      "mode": "view",
+      "keywords": [
+        "pause",
+        "schedule",
+        "days",
+        "暂停",
+        "定时恢复"
+      ]
+    },
+    {
       "name": "toggle-floating",
       "title": "Toggle Floating Window",
       "subtitle": "AeroSpace",
@@ -145,9 +159,9 @@
     },
     {
       "name": "browse-shortcuts",
-      "title": "Browse Shortcuts",
+      "title": "Common Shortcuts",
       "subtitle": "AeroSpace",
-      "description": "View and run AeroSpace keyboard shortcuts parsed from your config",
+      "description": "Choose and run common shortcuts from the active AeroSpace configuration",
       "mode": "view"
     }
   ],
@@ -171,6 +185,6 @@
     "fix-lint": "ray lint --fix",
     "lint": "ray lint",
     "publish": "npx @raycast/api@latest publish",
-    "test": "node scripts/test-rules.mjs"
+    "test": "node scripts/test-rules.mjs && node scripts/test-ui-contract.mjs && node scripts/test-grid-icons.mjs"
   }
 }

@@ -30,29 +30,37 @@ import {
   diagnoseInstallation,
   errorMessage,
   getServiceSummary,
+  getPauseSchedule,
   listAvailableSubcommands,
   listMonitors,
   listWindows,
   listWorkspaces,
   quitAerospace,
   reloadAerospace,
+  resumeAeroSpaceNow,
   resolveConfigPath,
   splitArguments,
   startAerospace,
   toggleAerospace,
 } from "./utils/aerospace";
 import { readWindowRule, saveWindowRule } from "./utils/rules";
-import { coloredIcon, compactGridIcon, CompactGridColor, CompactGridIcon, PALETTE } from "./utils/theme";
+import { CONTROL_GRID_COLUMNS, CONTROL_GRID_INSET, coloredIcon, compactGridIcon, PALETTE } from "./utils/theme";
 import { SETUP_COMPLETE_KEY, SetupGate, checkSetupReadiness } from "./setup";
+import { CommonShortcuts } from "./browse-shortcuts";
+import { PauseAeroSpaceForm } from "./pause-aerospace";
 
-async function run(title: string, task: () => Promise<{ stdout: string; stderr: string }>, onDone?: () => void) {
+async function run(
+  title: string,
+  task: () => Promise<{ stdout: string; stderr: string }>,
+  onDone?: () => void | Promise<void>,
+) {
   const toast = await showToast({ style: Toast.Style.Animated, title });
   try {
     const result = await task();
     toast.style = Toast.Style.Success;
     toast.title = "Done";
     toast.message = result.stdout || result.stderr || title;
-    onDone?.();
+    await onDone?.();
   } catch (error) {
     toast.style = Toast.Style.Failure;
     toast.title = "Command Failed";
@@ -760,219 +768,6 @@ function MonitorsView() {
   );
 }
 
-const QUICK_COMMANDS: Array<{
-  title: string;
-  subtitle: string;
-  icon: Icon;
-  args: string[];
-  section: string;
-}> = [
-  ...(["left", "down", "up", "right"] as const).map((direction) => ({
-    title: `Focus ${direction.charAt(0).toUpperCase()}${direction.slice(1)}`,
-    subtitle: `focus ${direction}`,
-    icon: Icon.Eye,
-    args: ["focus", direction],
-    section: "Focus and Move",
-  })),
-  ...(["left", "down", "up", "right"] as const).map((direction) => ({
-    title: `Move ${direction.charAt(0).toUpperCase()}${direction.slice(1)}`,
-    subtitle: `move ${direction}`,
-    icon: Icon.ArrowRight,
-    args: ["move", direction],
-    section: "Focus and Move",
-  })),
-  {
-    title: "Focus Back and Forth",
-    subtitle: "focus-back-and-forth",
-    icon: Icon.Switch,
-    args: ["focus-back-and-forth"],
-    section: "Focus and Move",
-  },
-  {
-    title: "Swap with Next Window",
-    subtitle: "swap dfs-next",
-    icon: Icon.Shuffle,
-    args: ["swap", "dfs-next"],
-    section: "Focus and Move",
-  },
-  {
-    title: "Split Horizontally",
-    subtitle: "split horizontal",
-    icon: Icon.AppWindowSidebarLeft,
-    args: ["split", "horizontal"],
-    section: "Layout",
-  },
-  {
-    title: "Split Vertically",
-    subtitle: "split vertical",
-    icon: Icon.AppWindowSidebarRight,
-    args: ["split", "vertical"],
-    section: "Layout",
-  },
-  {
-    title: "Set Tiling",
-    subtitle: "layout tiling",
-    icon: Icon.AppWindowGrid3x3,
-    args: ["layout", "tiling"],
-    section: "Layout",
-  },
-  {
-    title: "Set Floating",
-    subtitle: "layout floating",
-    icon: Icon.AppWindow,
-    args: ["layout", "floating"],
-    section: "Layout",
-  },
-  {
-    title: "Horizontal Tiles",
-    subtitle: "layout h_tiles",
-    icon: Icon.AppWindowGrid3x3,
-    args: ["layout", "h_tiles"],
-    section: "Layout",
-  },
-  {
-    title: "Vertical Tiles",
-    subtitle: "layout v_tiles",
-    icon: Icon.AppWindowGrid3x3,
-    args: ["layout", "v_tiles"],
-    section: "Layout",
-  },
-  {
-    title: "Horizontal Accordion",
-    subtitle: "layout h_accordion",
-    icon: Icon.List,
-    args: ["layout", "h_accordion"],
-    section: "Layout",
-  },
-  {
-    title: "Vertical Accordion",
-    subtitle: "layout v_accordion",
-    icon: Icon.List,
-    args: ["layout", "v_accordion"],
-    section: "Layout",
-  },
-  {
-    title: "Shrink Window",
-    subtitle: "resize smart -50",
-    icon: Icon.Minus,
-    args: ["resize", "smart", "-50"],
-    section: "Size and Window",
-  },
-  {
-    title: "Grow Window",
-    subtitle: "resize smart +50",
-    icon: Icon.Plus,
-    args: ["resize", "smart", "+50"],
-    section: "Size and Window",
-  },
-  {
-    title: "Toggle AeroSpace Fullscreen",
-    subtitle: "fullscreen",
-    icon: Icon.Maximize,
-    args: ["fullscreen"],
-    section: "Size and Window",
-  },
-  {
-    title: "Minimize Window",
-    subtitle: "macos-native-minimize",
-    icon: Icon.MinusCircle,
-    args: ["macos-native-minimize"],
-    section: "Size and Window",
-  },
-  {
-    title: "Workspace Back and Forth",
-    subtitle: "workspace-back-and-forth",
-    icon: Icon.Switch,
-    args: ["workspace-back-and-forth"],
-    section: "Workspace",
-  },
-  {
-    title: "Next Workspace",
-    subtitle: "workspace next",
-    icon: Icon.ArrowRight,
-    args: ["workspace", "next"],
-    section: "Workspace",
-  },
-  {
-    title: "Previous Workspace",
-    subtitle: "workspace prev",
-    icon: Icon.ArrowLeft,
-    args: ["workspace", "prev"],
-    section: "Workspace",
-  },
-  {
-    title: "Reload Configuration",
-    subtitle: "reload-config",
-    icon: Icon.RotateClockwise,
-    args: ["reload-config"],
-    section: "Maintenance",
-  },
-  {
-    title: "Balance Sizes",
-    subtitle: "balance-sizes",
-    icon: Icon.FullSignal,
-    args: ["balance-sizes"],
-    section: "Maintenance",
-  },
-  {
-    title: "Flatten Workspace Tree",
-    subtitle: "flatten-workspace-tree",
-    icon: Icon.Tree,
-    args: ["flatten-workspace-tree"],
-    section: "Maintenance",
-  },
-];
-
-function QuickCommandsView() {
-  const grouped = QUICK_COMMANDS.reduce<Record<string, typeof QUICK_COMMANDS>>((result, item) => {
-    (result[item.section] ||= []).push(item);
-    return result;
-  }, {});
-  const sectionColors: Record<string, CompactGridColor> = {
-    "Focus and Move": "blue",
-    Layout: "cyan",
-    "Size and Window": "orange",
-    Workspace: "purple",
-    Maintenance: "green",
-  };
-  const sectionIcons: Record<string, CompactGridIcon> = {
-    "Focus and Move": "focus",
-    Layout: "layout",
-    "Size and Window": "resize",
-    Workspace: "workspaces",
-    Maintenance: "maintenance",
-  };
-  return (
-    <Grid
-      columns={8}
-      aspectRatio="1"
-      inset={Grid.Inset.Zero}
-      searchBarPlaceholder="Search AeroSpace actions…"
-      navigationTitle="AeroSpace Quick Actions"
-    >
-      {Object.entries(grouped).map(([section, items]) => (
-        <Grid.Section key={section} title={section} subtitle={`${items.length} actions`} columns={8}>
-          {items.map((item) => (
-            <Grid.Item
-              key={item.subtitle}
-              content={{
-                value: compactGridIcon(sectionIcons[section] || "bolt", sectionColors[section] || "blue"),
-                tooltip: `${item.title} — aerospace ${item.subtitle}`,
-              }}
-              title={item.title}
-              actions={
-                <ActionPanel>
-                  <CommandAction title={item.title} args={item.args} onDone={popToRoot} />
-                </ActionPanel>
-              }
-            />
-          ))}
-        </Grid.Section>
-      ))}
-    </Grid>
-  );
-}
-
 function AnyCommandForm() {
   const { push } = useNavigation();
   const [subcommands, setSubcommands] = useState<string[]>([...ALL_SUBCOMMANDS]);
@@ -1072,16 +867,22 @@ export default function ControlCenter() {
   const [state, setState] = useState<ServiceState>("stopped");
   const [stateLabel, setStateLabel] = useState("Detecting…");
   const [configPath, setConfigPath] = useState<string | null>(null);
+  const [pauseSchedule, setPauseSchedule] = useState<Awaited<ReturnType<typeof getPauseSchedule>>>(null);
   const [loading, setLoading] = useState(true);
   const [setupMode, setSetupMode] = useState<"checking" | "show" | "hidden">("checking");
   const { pop, push } = useNavigation();
 
   const refresh = async () => {
     setLoading(true);
-    const [summary, config] = await Promise.all([getServiceSummary(), resolveConfigPath(true)]);
+    const [summary, config, schedule] = await Promise.all([
+      getServiceSummary(),
+      resolveConfigPath(true),
+      getPauseSchedule(),
+    ]);
     setState(summary.state);
     setStateLabel(summary.label);
     setConfigPath(config);
+    setPauseSchedule(schedule);
     setLoading(false);
   };
   useEffect(() => {
@@ -1134,24 +935,63 @@ export default function ControlCenter() {
   return (
     <Grid
       isLoading={loading}
-      columns={8}
+      columns={CONTROL_GRID_COLUMNS}
       aspectRatio="1"
-      inset={Grid.Inset.Zero}
+      inset={CONTROL_GRID_INSET}
       navigationTitle="AeroSpace Control Center"
       searchBarPlaceholder="Search controls…"
     >
-      <Grid.Section title="Start Here" subtitle="Guided setup and essential controls" columns={6}>
+      <Grid.Section
+        title="Common Commands"
+        subtitle="Frequently used shortcuts and system controls"
+        columns={CONTROL_GRID_COLUMNS}
+      >
         <Grid.Item
           content={{
-            value: compactGridIcon("tools", "cyan"),
+            value: compactGridIcon("pause"),
+            tooltip: "Pause automatic window management for a chosen number of days and resume automatically",
+          }}
+          title={pauseSchedule ? "Scheduled Pause" : "Pause for Days"}
+          subtitle={
+            pauseSchedule ? `Until ${new Date(pauseSchedule.resumeAt).toLocaleDateString()}` : "Automatic Resume"
+          }
+          actions={
+            <ActionPanel>
+              {pauseSchedule ? (
+                <Action
+                  title="Resume Now and Cancel Scheduled Pause"
+                  icon={Icon.Play}
+                  onAction={() => run("Resuming AeroSpace", resumeAeroSpaceNow, refresh)}
+                />
+              ) : null}
+              <Action
+                title={pauseSchedule ? "Change Pause Schedule" : "Pause AeroSpace for Days"}
+                icon={pauseSchedule ? Icon.Clock : Icon.Pause}
+                onAction={() => push(<PauseAeroSpaceForm onComplete={refresh} />)}
+              />
+            </ActionPanel>
+          }
+        />
+        <Grid.Item
+          content={{
+            value: compactGridIcon("keyboard"),
+            tooltip: "Run and customize common shortcuts from the active AeroSpace configuration",
+          }}
+          title="Common Shortcuts"
+          subtitle="From Active Config"
+          actions={
+            <ActionPanel>
+              <Action title="Open Common Shortcuts" icon={Icon.Keyboard} onAction={() => push(<CommonShortcuts />)} />
+            </ActionPanel>
+          }
+        />
+        <Grid.Item
+          content={{
+            value: compactGridIcon("tools"),
             tooltip: "Check installation health and open the guided setup and repair workflow",
           }}
           title="Setup & Repair"
           subtitle="Guided Setup"
-          accessory={{
-            icon: coloredIcon(Icon.Stars, PALETTE.teal),
-            tooltip: "Recommended starting point",
-          }}
           actions={
             <ActionPanel>
               <Action
@@ -1164,32 +1004,11 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("bolt", "yellow"),
-            tooltip: "Focus, move, split, resize, and maintain window layouts",
-          }}
-          title="Quick Actions"
-          subtitle="Everyday Controls"
-          accessory={{
-            icon: coloredIcon(Icon.Bolt, PALETTE.amber),
-            tooltip: "Frequently used controls",
-          }}
-          actions={
-            <ActionPanel>
-              <Action title="Open Quick Actions" icon={Icon.Bolt} onAction={() => push(<QuickCommandsView />)} />
-            </ActionPanel>
-          }
-        />
-        <Grid.Item
-          content={{
-            value: compactGridIcon("heartbeat", "green"),
+            value: compactGridIcon("heartbeat"),
             tooltip: "Review detected paths, client and server versions, configuration, and issues",
           }}
           title="Compatibility"
           subtitle="System Health"
-          accessory={{
-            icon: coloredIcon(Icon.Heartbeat, PALETTE.green),
-            tooltip: "Installation and version status",
-          }}
           actions={
             <ActionPanel>
               <Action
@@ -1202,10 +1021,10 @@ export default function ControlCenter() {
         />
       </Grid.Section>
 
-      <Grid.Section title="Browse and Control" subtitle="Live window management" columns={8}>
+      <Grid.Section title="Browse and Control" subtitle="Live window management" columns={CONTROL_GRID_COLUMNS}>
         <Grid.Item
           content={{
-            value: compactGridIcon("window", "blue"),
+            value: compactGridIcon("window"),
             tooltip: "Focus, move, resize, change layout, minimize, or close windows",
           }}
           title="Windows"
@@ -1217,7 +1036,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("workspaces", "purple"),
+            value: compactGridIcon("workspaces"),
             tooltip: "See window and app counts, switch workspaces, summon, balance, or flatten",
           }}
           title="Workspaces"
@@ -1229,7 +1048,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("monitor", "cyan"),
+            value: compactGridIcon("monitor"),
             tooltip: "Focus displays or move windows and workspaces between monitors",
           }}
           title="Monitors"
@@ -1241,19 +1060,10 @@ export default function ControlCenter() {
         />
       </Grid.Section>
 
-      <Grid.Section title="Service" subtitle="Status and lifecycle" columns={8}>
+      <Grid.Section title="Service" subtitle="Status and lifecycle" columns={CONTROL_GRID_COLUMNS}>
         <Grid.Item
           content={{
-            value: compactGridIcon(
-              state === "enabled" ? "status" : "status-ring",
-              state === "enabled"
-                ? "green"
-                : state === "disabled"
-                  ? "orange"
-                  : state === "not-installed"
-                    ? "red"
-                    : "blue",
-            ),
+            value: compactGridIcon(state === "enabled" ? "status" : "status-ring"),
             tooltip: `${serviceSubtitle}. ${configPath ? "Configuration detected." : "Using built-in defaults."}`,
           }}
           title={stateLabel}
@@ -1283,7 +1093,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("reload", "blue"),
+            value: compactGridIcon("reload"),
             tooltip: "Apply changes from the active aerospace.toml configuration",
           }}
           title="Reload Config"
@@ -1298,7 +1108,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("power", "pink"),
+            value: compactGridIcon("power"),
             tooltip: "Stop AeroSpace and automatic window management",
           }}
           title="Quit AeroSpace"
@@ -1326,10 +1136,10 @@ export default function ControlCenter() {
         />
       </Grid.Section>
 
-      <Grid.Section title="Tools" subtitle="Diagnostics and power features" columns={8}>
+      <Grid.Section title="Tools" subtitle="Diagnostics and power features" columns={CONTROL_GRID_COLUMNS}>
         <Grid.Item
           content={{
-            value: compactGridIcon("menu-bar", "purple"),
+            value: compactGridIcon("menu-bar"),
             tooltip: "Enable persistent status, workspaces, and controls in the macOS menu bar",
           }}
           title="Menu Bar"
@@ -1350,7 +1160,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("terminal", "yellow"),
+            value: compactGridIcon("terminal"),
             tooltip: `Run any of ${ALL_SUBCOMMANDS.length} detected AeroSpace subcommands`,
           }}
           title="Any Command"
@@ -1362,7 +1172,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("list", "blue"),
+            value: compactGridIcon("list"),
             tooltip: "Inspect applications currently managed by AeroSpace",
           }}
           title="Applications"
@@ -1377,7 +1187,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("settings", "pink"),
+            value: compactGridIcon("settings"),
             tooltip: "Inspect active and configured keyboard binding modes",
           }}
           title="Binding Modes"
@@ -1392,7 +1202,7 @@ export default function ControlCenter() {
         />
         <Grid.Item
           content={{
-            value: compactGridIcon("code", "cyan"),
+            value: compactGridIcon("code"),
             tooltip: "Inspect environment variables available to AeroSpace commands",
           }}
           title="Environment"

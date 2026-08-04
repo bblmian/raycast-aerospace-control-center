@@ -5,6 +5,7 @@ import {
   WorkspaceInfo,
   aerospace,
   errorMessage,
+  getPauseSchedule,
   getServiceSummary,
   listWorkspaces,
   reloadAerospace,
@@ -16,15 +17,16 @@ type MenuData = {
   state: ServiceState;
   label: string;
   workspaces: WorkspaceInfo[];
+  hasScheduledPause: boolean;
 };
 
 async function loadMenu(): Promise<MenuData> {
-  const summary = await getServiceSummary();
+  const [summary, schedule] = await Promise.all([getServiceSummary(), getPauseSchedule()]);
   let workspaces: WorkspaceInfo[] = [];
   if (summary.state === "enabled") {
     workspaces = await listWorkspaces().catch(() => []);
   }
-  return { ...summary, workspaces };
+  return { ...summary, workspaces, hasScheduledPause: schedule !== null };
 }
 
 async function execute(task: () => Promise<{ stdout: string; stderr: string }>) {
@@ -72,7 +74,13 @@ export default function Command() {
             state === "enabled" ? PALETTE.amber : PALETTE.green,
           )}
           title={
-            state === "enabled" ? "Pause AeroSpace" : state === "disabled" ? "Resume AeroSpace" : "Start AeroSpace"
+            data?.hasScheduledPause
+              ? "Resume Now and Cancel Scheduled Pause"
+              : state === "enabled"
+                ? "Pause AeroSpace"
+                : state === "disabled"
+                  ? "Resume AeroSpace"
+                  : "Start AeroSpace"
           }
           onAction={async () => {
             await execute(toggleAerospace);
@@ -80,9 +88,24 @@ export default function Command() {
           }}
         />
         <MenuBarExtra.Item
-          icon={coloredIcon(Icon.AppWindow, PALETTE.indigo)}
-          title="Toggle Focused Window Floating / Tiling"
-          onAction={() => execute(() => aerospace(["layout", "floating", "tiling"]))}
+          icon={coloredIcon(Icon.Pause, PALETTE.amber)}
+          title={data?.hasScheduledPause ? "Change Pause Schedule…" : "Pause AeroSpace for Days…"}
+          onAction={() =>
+            launchCommand({
+              name: "pause-aerospace",
+              type: LaunchType.UserInitiated,
+            })
+          }
+        />
+        <MenuBarExtra.Item
+          icon={coloredIcon(Icon.Keyboard, PALETTE.indigo)}
+          title="Common Shortcuts…"
+          onAction={() =>
+            launchCommand({
+              name: "browse-shortcuts",
+              type: LaunchType.UserInitiated,
+            })
+          }
         />
         <MenuBarExtra.Item
           icon={coloredIcon(Icon.RotateClockwise, PALETTE.blue)}

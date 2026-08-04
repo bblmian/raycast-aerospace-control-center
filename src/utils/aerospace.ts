@@ -10,6 +10,7 @@ import {
   open as openFile,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from "fs/promises";
@@ -24,7 +25,7 @@ const execFileAsync = promisify(execFile);
 
 export type CommandResult = { stdout: string; stderr: string };
 export type InstallationProgress = {
-  phase: "checking" | "downloading" | "verifying" | "extracting" | "installing" | "complete";
+  phase: "checking" | "downloading" | "verifying" | "extracting" | "installing" | "restarting" | "complete";
   message: string;
   percent?: number;
 };
@@ -68,6 +69,11 @@ const WORKSPACE_LIST_FORMAT =
 const WINDOW_LIST_FORMAT =
   "%{window-id} %{app-name} %{app-bundle-id} %{window-title} %{workspace} %{monitor-id} %{monitor-name} %{window-layout}";
 const MONITOR_LIST_FORMAT = "%{monitor-id} %{monitor-name} %{monitor-appkit-nsscreen-screens-id} %{monitor-is-main}";
+const PAUSE_AGENT_LABEL = "com.bblmian.raycast-aerospace-resume";
+const PAUSE_SUPPORT_DIRECTORY = join(homedir(), "Library", "Application Support", "AeroSpace Control Center");
+const PAUSE_AGENT_PATH = join(homedir(), "Library", "LaunchAgents", `${PAUSE_AGENT_LABEL}.plist`);
+const PAUSE_SCRIPT_PATH = join(PAUSE_SUPPORT_DIRECTORY, "resume-aerospace.sh");
+const PAUSE_STATE_PATH = join(PAUSE_SUPPORT_DIRECTORY, "pause-schedule.json");
 
 const RECOMMENDED_FLOATING_BUNDLE_IDS = [
   ["Messages", "com.apple.MobileSMS"],
@@ -101,6 +107,12 @@ export type InstallationInfo = {
   serverVersion: string | null;
   state: ServiceState;
   issues: string[];
+};
+
+export type PauseSchedule = {
+  pausedAt: string;
+  resumeAt: string;
+  days: number;
 };
 
 let binaryCache: string | null | undefined;
@@ -141,8 +153,7 @@ async function caskBinaryCandidates(): Promise<string[]> {
   try {
     const versions = await readdir(root);
     return versions
-      .sort()
-      .reverse()
+      .sort((left, right) => compareAeroSpaceVersions(right, left))
       .map((version) => join(root, version, `AeroSpace-v${version}`, "bin", "aerospace"));
   } catch {
     return [];
@@ -251,6 +262,14 @@ async function runProcessWithProgress(
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    const timeout = setTimeout(
+      () => {
+        timedOut = true;
+        child.kill("SIGTERM");
+      },
+      15 * 60 * 1000,
+    );
 
     const report = (chunk: Buffer, stream: "stdout" | "stderr") => {
       const text = chunk.toString();
@@ -266,10 +285,20 @@ async function runProcessWithProgress(
 
     child.stdout.on("data", (chunk: Buffer) => report(chunk, "stdout"));
     child.stderr.on("data", (chunk: Buffer) => report(chunk, "stderr"));
-    child.on("error", rejectPromise);
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      rejectPromise(error);
+    });
     child.on("close", (code) => {
+      clearTimeout(timeout);
       const result = { stdout: stdout.trim(), stderr: stderr.trim() };
-      if (code === 0) resolvePromise(result);
+      if (timedOut) {
+        rejectPromise(
+          new Error(
+            `${basename(command)} did not finish within 15 minutes. The process was stopped; check your network connection and Homebrew status before trying again.`,
+          ),
+        );
+      } else if (code === 0) resolvePromise(result);
       else
         rejectPromise(
           new Error(result.stderr || result.stdout || `${basename(command)} exited with status ${code ?? "unknown"}.`),
@@ -282,6 +311,39 @@ function clearInstallationCaches() {
   binaryCache = undefined;
   appCache = undefined;
   configCache = undefined;
+}
+
+async function isAeroSpaceRunning(): Promise<boolean> {
+  try {
+    await execFileAsync("/usr/bin/pgrep", ["-x", "AeroSpace"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForAeroSpaceToQuit(): Promise<void> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (!(await isAeroSpaceRunning())) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+  }
+  throw new Error("The older AeroSpace background service did not quit. Quit AeroSpace manually, then try again.");
+}
+
+export async function restartAerospace(onProgress?: (progress: InstallationProgress) => void): Promise<CommandResult> {
+  const app = await findAerospaceApp(true);
+  if (!app) throw new Error("AeroSpace.app was not found. Set its path in extension preferences.");
+
+  onProgress?.({ phase: "restarting", message: "Restarting AeroSpace with the updated version…" });
+  if (await isAeroSpaceRunning()) {
+    await execFileAsync("/usr/bin/osascript", ["-e", 'tell application id "bobko.aerospace" to quit']);
+    await waitForAeroSpaceToQuit();
+  }
+  clearInstallationCaches();
+  await execFileAsync("/usr/bin/open", [app]);
+  await waitForServer();
+  await verifyServerCompatibility();
+  return { stdout: "AeroSpace restarted and is ready", stderr: "" };
 }
 
 export async function installAerospaceWithHomebrew(
@@ -302,8 +364,9 @@ export async function installAerospaceWithHomebrew(
     onProgress,
   );
   clearInstallationCaches();
+  await restartAerospace(onProgress);
   onProgress?.({ phase: "complete", message: "AeroSpace installation completed.", percent: 100 });
-  return result;
+  return { stdout: "AeroSpace installed, restarted, and verified.", stderr: result.stderr };
 }
 
 export async function updateAerospaceWithHomebrew(
@@ -311,20 +374,60 @@ export async function updateAerospaceWithHomebrew(
 ): Promise<CommandResult> {
   const brew = await findHomebrewBinary();
   if (!brew) throw new Error("Homebrew was not found, so this installation cannot be updated here.");
+  const wasRunning = await isAeroSpaceRunning();
   onProgress?.({ phase: "checking", message: "Checking the Homebrew cask…" });
   const result = await runProcessWithProgress(brew, ["upgrade", "--cask", "nikitabobko/tap/aerospace"], onProgress);
   clearInstallationCaches();
-  onProgress?.({ phase: "complete", message: "AeroSpace update completed.", percent: 100 });
-  return result;
+  if (wasRunning) {
+    await restartAerospace(onProgress);
+  } else {
+    onProgress?.({ phase: "verifying", message: "Verifying the installed AeroSpace files…" });
+    const [binary, app] = await Promise.all([findAerospaceBinary(true), findAerospaceApp(true)]);
+    if (!binary || !app) {
+      throw new Error("Homebrew finished, but the AeroSpace application and CLI could not both be detected.");
+    }
+    const [clientVersion, appVersion] = await Promise.all([
+      installedClientVersion(binary, app),
+      installedAppVersion(app),
+    ]);
+    if (!clientVersion || !appVersion) {
+      throw new Error("Homebrew finished, but the installed AeroSpace versions could not be verified.");
+    }
+    if (clientVersion !== appVersion) {
+      throw new Error(`Homebrew finished, but CLI ${clientVersion} and app ${appVersion} do not match.`);
+    }
+  }
+  onProgress?.({
+    phase: "complete",
+    message: wasRunning ? "AeroSpace updated and restarted." : "AeroSpace updated. Its stopped state was preserved.",
+    percent: 100,
+  });
+  return {
+    stdout: wasRunning
+      ? "AeroSpace updated, restarted, and verified."
+      : "AeroSpace updated and verified. It remains stopped because it was not running before the update.",
+    stderr: result.stderr,
+  };
 }
 
 export async function getLatestAeroSpaceRelease(): Promise<AeroSpaceRelease> {
-  const response = await fetch("https://api.github.com/repos/nikitabobko/AeroSpace/releases?per_page=10", {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "raycast-aerospace-control-center",
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  let response: Response;
+  try {
+    response = await fetch("https://api.github.com/repos/nikitabobko/AeroSpace/releases?per_page=10", {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "raycast-aerospace-control-center",
+      },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("The official AeroSpace release check timed out.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     throw new Error(`GitHub release check failed (${response.status}).`);
   }
@@ -400,11 +503,14 @@ export async function installLatestAeroSpaceDirect(
   const destinationBinary = join(userBin, "aerospace");
   let createdApp = false;
   let createdBinary = false;
+  const downloadController = new AbortController();
+  const downloadTimeout = setTimeout(() => downloadController.abort(), 15 * 60 * 1000);
 
   try {
     onProgress?.({ phase: "downloading", message: `Downloading AeroSpace ${release.version}…` });
     const response = await fetch(release.downloadUrl, {
       headers: { "User-Agent": "raycast-aerospace-control-center" },
+      signal: downloadController.signal,
     });
     if (!response.ok || !response.body) {
       throw new Error(`Official download failed (${response.status}).`);
@@ -484,8 +590,12 @@ export async function installLatestAeroSpaceDirect(
     if (createdBinary) await rm(destinationBinary, { force: true });
     if (createdApp) await rm(destinationApp, { recursive: true, force: true });
     clearInstallationCaches();
+    if (downloadController.signal.aborted) {
+      throw new Error("The AeroSpace download did not finish within 15 minutes. No partial installation was kept.");
+    }
     throw error;
   } finally {
+    clearTimeout(downloadTimeout);
     await rm(temporaryRoot, { recursive: true, force: true });
   }
 }
@@ -587,12 +697,35 @@ export async function getServiceSummary(): Promise<{
 }
 
 async function waitForServer(): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     const state = await getServiceState();
     if (state === "enabled" || state === "disabled") return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
   }
   throw new Error("AeroSpace started, but its CLI server did not become ready.");
+}
+
+async function verifyServerCompatibility(): Promise<void> {
+  let result: CommandResult;
+  try {
+    result = await aerospace(["--version"]);
+  } catch (error) {
+    if (/client and server versions are incompatible/i.test(commandFailureOutput(error))) {
+      throw new Error(
+        "AeroSpace restarted, but an incompatible background service is still responding. Quit AeroSpace from Activity Monitor, reopen it, and try again.",
+      );
+    }
+    throw error;
+  }
+  const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+  const clientVersion = versionLine(output, "aerospace CLI client version:");
+  const serverVersion = versionLine(output, "AeroSpace.app server version:");
+  if (!clientVersion || !serverVersion) {
+    throw new Error("AeroSpace restarted, but the extension could not verify both installed and running versions.");
+  }
+  if (clientVersion !== serverVersion) {
+    throw new Error(`AeroSpace restarted, but CLI ${clientVersion} and app ${serverVersion} still do not match.`);
+  }
 }
 
 export async function startAerospace(): Promise<CommandResult> {
@@ -621,12 +754,122 @@ export async function toggleAerospace(): Promise<CommandResult> {
     await aerospace(["enable", "off"]);
     return { stdout: "AeroSpace paused", stderr: "" };
   }
+  if (await getPauseSchedule()) return resumeAeroSpaceNow();
   return startAerospace();
 }
 
 export async function reloadAerospace(): Promise<CommandResult> {
   await aerospace(["reload-config"]);
   return { stdout: "Configuration reloaded", stderr: "" };
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function xmlEscape(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function unloadPauseAgent(): Promise<void> {
+  const domain = `gui/${process.getuid?.() ?? 501}`;
+  try {
+    await execFileAsync("/bin/launchctl", ["bootout", `${domain}/${PAUSE_AGENT_LABEL}`]);
+  } catch {
+    // The agent is already unloaded.
+  }
+}
+
+export async function cancelScheduledResume(): Promise<void> {
+  await unloadPauseAgent();
+  await Promise.all([
+    rm(PAUSE_AGENT_PATH, { force: true }),
+    rm(PAUSE_SCRIPT_PATH, { force: true }),
+    rm(PAUSE_STATE_PATH, { force: true }),
+  ]);
+}
+
+export async function getPauseSchedule(): Promise<PauseSchedule | null> {
+  try {
+    const schedule = JSON.parse(await readFile(PAUSE_STATE_PATH, "utf8")) as PauseSchedule;
+    if (!schedule.resumeAt || !Number.isFinite(Date.parse(schedule.resumeAt))) return null;
+    return schedule;
+  } catch {
+    return null;
+  }
+}
+
+export async function pauseAeroSpaceForDays(days: number): Promise<CommandResult> {
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    throw new Error("Choose a whole number of days between 1 and 365.");
+  }
+  const binary = await findAerospaceBinary(true);
+  if (!binary) throw new Error("AeroSpace CLI was not found.");
+  const state = await getServiceState();
+  if (state === "not-installed" || state === "stopped") {
+    throw new Error("AeroSpace must be running before it can be paused for a scheduled period.");
+  }
+
+  const pausedAt = new Date();
+  const resumeAt = new Date(pausedAt.getTime() + days * 24 * 60 * 60 * 1000);
+  const targetEpoch = Math.floor(resumeAt.getTime() / 1000);
+  const domain = `gui/${process.getuid?.() ?? 501}`;
+  const script = `#!/bin/sh
+if [ "$(/bin/date +%s)" -lt "${targetEpoch}" ]; then
+  exit 0
+fi
+if ${shellQuote(binary)} enable on >/dev/null 2>&1; then
+  /bin/rm -f ${shellQuote(PAUSE_AGENT_PATH)} ${shellQuote(PAUSE_STATE_PATH)} ${shellQuote(PAUSE_SCRIPT_PATH)}
+  /usr/bin/osascript -e 'display notification "AeroSpace window management is active again." with title "AeroSpace Resumed"' >/dev/null 2>&1
+  /bin/launchctl bootout ${shellQuote(`${domain}/${PAUSE_AGENT_LABEL}`)} >/dev/null 2>&1
+fi
+`;
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${PAUSE_AGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array><string>${xmlEscape(PAUSE_SCRIPT_PATH)}</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>300</integer>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+`;
+  const schedule: PauseSchedule = {
+    pausedAt: pausedAt.toISOString(),
+    resumeAt: resumeAt.toISOString(),
+    days,
+  };
+
+  await cancelScheduledResume();
+  await mkdir(PAUSE_SUPPORT_DIRECTORY, { recursive: true });
+  await mkdir(dirname(PAUSE_AGENT_PATH), { recursive: true });
+  await writeFile(PAUSE_SCRIPT_PATH, script, { encoding: "utf8", mode: 0o700 });
+  await chmod(PAUSE_SCRIPT_PATH, 0o700);
+  await writeFile(PAUSE_STATE_PATH, JSON.stringify(schedule, null, 2), { encoding: "utf8", mode: 0o600 });
+  await writeFile(PAUSE_AGENT_PATH, plist, { encoding: "utf8", mode: 0o600 });
+
+  try {
+    await execFileAsync("/bin/launchctl", ["bootstrap", domain, PAUSE_AGENT_PATH]);
+    if (state === "enabled") await aerospace(["enable", "off"]);
+  } catch (error) {
+    await cancelScheduledResume();
+    throw error;
+  }
+
+  return {
+    stdout: `AeroSpace paused until ${resumeAt.toLocaleString()}`,
+    stderr: "",
+  };
+}
+
+export async function resumeAeroSpaceNow(): Promise<CommandResult> {
+  await startAerospace();
+  await cancelScheduledResume();
+  return { stdout: "AeroSpace resumed and the scheduled pause was cleared", stderr: "" };
 }
 
 export async function quitAerospace(): Promise<CommandResult> {
@@ -674,8 +917,43 @@ function versionLine(
   output: string,
   prefix: "aerospace CLI client version:" | "AeroSpace.app server version:",
 ): string | null {
-  const line = output.split("\n").find((candidate) => candidate.startsWith(prefix));
+  const line = output
+    .split("\n")
+    .map((candidate) => candidate.trim())
+    .find((candidate) => candidate.startsWith(prefix));
   return line ? line.slice(prefix.length).trim().split(/\s+/)[0] : null;
+}
+
+function commandFailureOutput(error: unknown): string {
+  if (!error || typeof error !== "object") return "";
+  const candidate = error as { stdout?: string; stderr?: string; message?: string };
+  return [candidate.stdout, candidate.stderr, candidate.message].filter(Boolean).join("\n");
+}
+
+async function installedClientVersion(binaryPath: string, appPath: string | null): Promise<string | null> {
+  try {
+    const resolvedBinary = await realpath(binaryPath);
+    const pathVersion =
+      resolvedBinary.match(/\/AeroSpace-v([^/]+)\/bin\/aerospace$/)?.[1] ||
+      resolvedBinary.match(/\/Caskroom\/aerospace\/([^/]+)\//)?.[1];
+    if (pathVersion) return pathVersion;
+  } catch {
+    // Fall back to the installed app bundle for non-Homebrew installations.
+  }
+  return appPath ? installedAppVersion(appPath) : null;
+}
+
+async function installedAppVersion(appPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("/usr/libexec/PlistBuddy", [
+      "-c",
+      "Print :CFBundleShortVersionString",
+      join(appPath, "Contents", "Info.plist"),
+    ]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function diagnoseInstallation(): Promise<InstallationInfo> {
@@ -687,23 +965,34 @@ export async function diagnoseInstallation(): Promise<InstallationInfo> {
   const state = await getServiceState();
   let clientVersion: string | null = null;
   let serverVersion: string | null = null;
+  let versionFailure = "";
   if (binaryPath) {
     try {
       const result = await aerospace(["--version"]);
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
       clientVersion = versionLine(output, "aerospace CLI client version:");
       serverVersion = versionLine(output, "AeroSpace.app server version:");
-    } catch {
-      // A broken or incompatible binary is reported below.
+    } catch (error) {
+      versionFailure = commandFailureOutput(error);
+      clientVersion = versionLine(versionFailure, "aerospace CLI client version:");
+      serverVersion = versionLine(versionFailure, "AeroSpace.app server version:");
     }
+    clientVersion ||= await installedClientVersion(binaryPath, appPath);
   }
 
   const issues: string[] = [];
   if (!binaryPath) issues.push("AeroSpace CLI was not found.");
   if (!appPath) issues.push("AeroSpace.app was not found.");
   if (!configPath) issues.push("No custom configuration was found. AeroSpace may be using its built-in defaults.");
+  if (/client and server versions are incompatible/i.test(versionFailure)) {
+    issues.push(
+      "AeroSpace was updated, but an older background service is still running. Restart AeroSpace to activate the installed version.",
+    );
+  }
   if (clientVersion && serverVersion && clientVersion !== serverVersion) {
-    issues.push(`CLI ${clientVersion} and app ${serverVersion} do not match. Reinstall or update AeroSpace.`);
+    issues.push(
+      `CLI ${clientVersion} and app ${serverVersion} do not match. Restart AeroSpace to activate the update.`,
+    );
   }
 
   return {
@@ -720,6 +1009,9 @@ export async function diagnoseInstallation(): Promise<InstallationInfo> {
 export function errorMessage(error: unknown): string {
   if (error && typeof error === "object") {
     const candidate = error as { stderr?: string; message?: string };
+    if (/client and server versions are incompatible/i.test(commandFailureOutput(error))) {
+      return "AeroSpace was updated, but its older background service is still running. Open Setup & Repair and restart AeroSpace.";
+    }
     if (candidate.stderr?.trim()) return candidate.stderr.trim();
     if (candidate.message?.startsWith("Command failed:")) {
       return "AeroSpace rejected the command without an explanation. The selected window may have changed or closed; refresh the list and try again.";

@@ -1,140 +1,267 @@
-import { Action, ActionPanel, Icon, List, showToast, Toast } from "@raycast/api";
-import { useEffect, useState } from "react";
-import { parseShortcuts, Shortcut } from "./utils/config-parser";
-import { aerospace } from "./utils/aerospace";
+import { Action, ActionPanel, Icon, Keyboard, List, LocalStorage, Toast, showToast, useNavigation } from "@raycast/api";
+import { useEffect, useMemo, useState } from "react";
+import { Shortcut, parseShortcuts } from "./utils/config-parser";
+import { aerospace, errorMessage } from "./utils/aerospace";
 import { coloredIcon, PALETTE } from "./utils/theme";
 
-const CATEGORY_CONFIG: Record<string, { icon: Icon; color: string }> = {
-  Focus: { icon: Icon.Eye, color: PALETTE.blue },
-  "Move Window": { icon: Icon.ArrowRight, color: PALETTE.teal },
-  Workspace: { icon: Icon.Window, color: PALETTE.indigo },
-  "Move to Workspace": { icon: Icon.ArrowUpCircleFilled, color: PALETTE.amber },
-  Layout: { icon: Icon.AppWindowGrid3x3, color: PALETTE.green },
-  Resize: { icon: Icon.FullSignal, color: PALETTE.slate },
-  Join: { icon: Icon.Link, color: PALETTE.coral },
-  Service: { icon: Icon.Gear, color: PALETTE.secondary },
-  Launch: { icon: Icon.Terminal, color: PALETTE.secondary },
-  Other: { icon: Icon.Dot, color: PALETTE.secondary },
+const FAVORITE_SHORTCUTS_KEY = "aerospace-control-center.favorite-shortcuts-v1";
+const DEFAULT_FAVORITE_LIMIT = 8;
+
+const CATEGORY_ICONS: Record<string, Icon> = {
+  Focus: Icon.Eye,
+  "Move Window": Icon.ArrowRight,
+  Workspace: Icon.AppWindowGrid2x2,
+  "Move to Workspace": Icon.ArrowUpCircle,
+  Layout: Icon.AppWindowGrid3x3,
+  Resize: Icon.ArrowsExpand,
+  Join: Icon.Link,
+  Service: Icon.Gear,
+  Launch: Icon.Terminal,
+  Other: Icon.CommandSymbol,
 };
 
-async function triggerShortcut(shortcut: Shortcut): Promise<void> {
-  await aerospace(["trigger-binding", shortcut.key, "--mode", shortcut.mode]);
+type ShortcutData = {
+  shortcuts: Shortcut[];
+  configPath: string | null;
+  favoriteIds: string[];
+};
+
+function categoryIcon(shortcut: Shortcut): Icon {
+  const category = shortcut.category.replace(/^\[.*?\]\s*/, "");
+  return CATEGORY_ICONS[category] ?? Icon.CommandSymbol;
 }
 
-function getCategoryConfig(category: string): { icon: Icon; color: string } {
-  const base = category.replace(/^\[.*?\]\s*/, "");
-  return CATEGORY_CONFIG[base] ?? CATEGORY_CONFIG["Other"];
-}
-
-export default function BrowseShortcuts() {
-  const [shortcuts, setShortcuts] = useState<Shortcut[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [configPath, setConfigPath] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    parseShortcuts()
-      .then(({ shortcuts, configPath }) => {
-        setShortcuts(shortcuts);
-        setConfigPath(configPath);
-        setIsLoading(false);
-        if (!configPath) {
-          setError(
-            "No custom AeroSpace configuration was found. Check extension preferences or use AeroSpace's documented config locations.",
-          );
-        }
-      })
-      .catch((err) => {
-        setError(String(err));
-        setIsLoading(false);
-      });
-  }, []);
-
-  const grouped = shortcuts.reduce<Record<string, Shortcut[]>>((acc, item) => {
-    (acc[item.category] = acc[item.category] || []).push(item);
-    return acc;
-  }, {});
-
-  if (!isLoading && error && shortcuts.length === 0) {
-    return (
-      <List>
-        <List.EmptyView icon={Icon.ExclamationMark} title="AeroSpace config not found" description={error} />
-      </List>
-    );
+function recommendedFavorites(shortcuts: Shortcut[]): string[] {
+  const priorities = [
+    /workspace-back-and-forth/,
+    /^workspace\s+/,
+    /layout floating tiling/,
+    /^layout\s+/,
+    /reload-config/,
+    /flatten-workspace-tree/,
+  ];
+  const selected: string[] = [];
+  for (const pattern of priorities) {
+    const match = shortcuts.find((shortcut) => !selected.includes(shortcut.id) && pattern.test(shortcut.command));
+    if (match) selected.push(match.id);
   }
+  for (const shortcut of shortcuts) {
+    if (selected.length >= DEFAULT_FAVORITE_LIMIT) break;
+    if (!selected.includes(shortcut.id)) selected.push(shortcut.id);
+  }
+  return selected;
+}
+
+async function loadShortcutData(): Promise<ShortcutData> {
+  const { shortcuts, configPath } = await parseShortcuts();
+  const availableIds = new Set(shortcuts.map((shortcut) => shortcut.id));
+  const stored = await LocalStorage.getItem<string>(FAVORITE_SHORTCUTS_KEY);
+  let favoriteIds: string[];
+  if (stored === undefined) {
+    favoriteIds = recommendedFavorites(shortcuts);
+  } else {
+    try {
+      favoriteIds = (JSON.parse(stored) as string[]).filter((id) => availableIds.has(id));
+    } catch {
+      favoriteIds = recommendedFavorites(shortcuts);
+    }
+  }
+  await LocalStorage.setItem(FAVORITE_SHORTCUTS_KEY, JSON.stringify(favoriteIds));
+  return { shortcuts, configPath, favoriteIds };
+}
+
+async function runShortcut(shortcut: Shortcut): Promise<void> {
+  const toast = await showToast({ style: Toast.Style.Animated, title: shortcut.description });
+  try {
+    await aerospace(["trigger-binding", shortcut.key, "--mode", shortcut.mode]);
+    toast.style = Toast.Style.Success;
+    toast.title = "Shortcut Run";
+    toast.message = `${shortcut.keyDisplay} · ${shortcut.command}`;
+  } catch (error) {
+    toast.style = Toast.Style.Failure;
+    toast.title = "Shortcut Failed";
+    toast.message = errorMessage(error);
+  }
+}
+
+function ShortcutActions({
+  shortcut,
+  configPath,
+  isFavorite,
+  onToggleFavorite,
+  onManage,
+  onRefresh,
+}: {
+  shortcut: Shortcut;
+  configPath: string | null;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
+  onManage?: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <ActionPanel>
+      <Action title="Run Shortcut" icon={Icon.Play} onAction={() => runShortcut(shortcut)} />
+      {onManage ? <Action title="Manage Common Shortcuts" icon={Icon.CheckList} onAction={onManage} /> : null}
+      <Action
+        title={isFavorite ? "Remove from Common Shortcuts" : "Add to Common Shortcuts"}
+        icon={isFavorite ? Icon.MinusCircle : Icon.PlusCircle}
+        onAction={onToggleFavorite}
+      />
+      {configPath ? (
+        <Action.Open title="Edit Shortcut in AeroSpace Config" target={configPath} icon={Icon.Document} />
+      ) : null}
+      <Action
+        title="Refresh from Active Config"
+        icon={Icon.ArrowClockwise}
+        shortcut={Keyboard.Shortcut.Common.Refresh}
+        onAction={onRefresh}
+      />
+      <Action.CopyToClipboard title="Copy Command" content={shortcut.command} />
+    </ActionPanel>
+  );
+}
+
+function ManageCommonShortcuts({ data, onChange }: { data: ShortcutData; onChange: (ids: string[]) => void }) {
+  const [currentData, setCurrentData] = useState(data);
+  const selected = new Set(currentData.favoriteIds);
+  const grouped = useMemo(
+    () =>
+      currentData.shortcuts.reduce<Record<string, Shortcut[]>>((result, shortcut) => {
+        (result[shortcut.category] ||= []).push(shortcut);
+        return result;
+      }, {}),
+    [currentData.shortcuts],
+  );
+
+  const toggle = async (id: string) => {
+    const next = selected.has(id)
+      ? currentData.favoriteIds.filter((candidate) => candidate !== id)
+      : [...currentData.favoriteIds, id];
+    await LocalStorage.setItem(FAVORITE_SHORTCUTS_KEY, JSON.stringify(next));
+    setCurrentData((current) => ({ ...current, favoriteIds: next }));
+    onChange(next);
+  };
+
+  const refresh = async () => {
+    const next = await loadShortcutData();
+    setCurrentData(next);
+    onChange(next.favoriteIds);
+  };
 
   return (
-    <List isLoading={isLoading} searchBarPlaceholder="Search shortcuts…">
-      {Object.entries(grouped).map(([category, items]) => {
-        const { icon, color } = getCategoryConfig(category);
-        return (
-          <List.Section key={category} title={category} subtitle={`${items.length}`}>
-            {items.map((item) => (
-              <List.Item
-                key={item.id}
-                icon={coloredIcon(icon, color)}
-                title={item.description}
-                subtitle={item.command !== item.description ? item.command : undefined}
-                accessories={[
-                  {
-                    text: item.keyDisplay,
-                    icon: coloredIcon(Icon.CommandSymbol, item.mode === "main" ? PALETTE.blue : PALETTE.amber),
-                    tooltip: `${item.mode} mode shortcut`,
-                  },
-                ]}
-                actions={
-                  <ActionPanel>
-                    <ActionPanel.Section>
-                      <Action
-                        title="Run Command"
-                        icon={Icon.Terminal}
-                        onAction={async () => {
-                          try {
-                            await triggerShortcut(item);
-                            await showToast({
-                              style: Toast.Style.Success,
-                              title: "Done",
-                              message: item.command,
-                            });
-                          } catch (err) {
-                            await showToast({
-                              style: Toast.Style.Failure,
-                              title: "Failed",
-                              message: String(err),
-                            });
-                          }
-                        }}
-                      />
-                    </ActionPanel.Section>
-                    <ActionPanel.Section>
-                      <Action.CopyToClipboard
-                        title="Copy Command"
-                        content={item.command}
-                        shortcut={{ modifiers: ["cmd"], key: "c" }}
-                      />
-                      <Action.CopyToClipboard
-                        title="Copy Shortcut Key"
-                        content={item.key}
-                        shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
-                      />
-                    </ActionPanel.Section>
-                    {configPath && (
-                      <ActionPanel.Section>
-                        <Action.Open
-                          title="Open Config File"
-                          target={configPath}
-                          icon={Icon.Document}
-                          shortcut={{ modifiers: ["cmd"], key: "o" }}
-                        />
-                      </ActionPanel.Section>
-                    )}
-                  </ActionPanel>
-                }
-              />
-            ))}
-          </List.Section>
-        );
-      })}
+    <List navigationTitle="Manage Common Shortcuts" searchBarPlaceholder="Search active AeroSpace shortcuts…">
+      {Object.entries(grouped).map(([category, shortcuts]) => (
+        <List.Section key={category} title={category} subtitle={`${shortcuts.length} active`}>
+          {shortcuts.map((shortcut) => (
+            <List.Item
+              key={shortcut.id}
+              icon={coloredIcon(categoryIcon(shortcut), PALETTE.secondary)}
+              title={shortcut.description}
+              subtitle={shortcut.command}
+              accessories={[
+                { text: shortcut.keyDisplay },
+                ...(selected.has(shortcut.id) ? [{ icon: Icon.Check, tooltip: "Shown in Common Shortcuts" }] : []),
+              ]}
+              actions={
+                <ShortcutActions
+                  shortcut={shortcut}
+                  configPath={currentData.configPath}
+                  isFavorite={selected.has(shortcut.id)}
+                  onToggleFavorite={() => toggle(shortcut.id)}
+                  onRefresh={refresh}
+                />
+              }
+            />
+          ))}
+        </List.Section>
+      ))}
     </List>
   );
+}
+
+export function CommonShortcuts() {
+  const { push } = useNavigation();
+  const [data, setData] = useState<ShortcutData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      setError(null);
+      setData(await loadShortcutData());
+    } catch (loadError) {
+      setError(errorMessage(loadError));
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const updateFavorites = (favoriteIds: string[]) => {
+    setData((current) => (current ? { ...current, favoriteIds } : current));
+  };
+  const favoriteSet = new Set(data?.favoriteIds ?? []);
+  const favorites = data?.shortcuts.filter((shortcut) => favoriteSet.has(shortcut.id)) ?? [];
+  const manage = () => {
+    if (data) push(<ManageCommonShortcuts data={data} onChange={updateFavorites} />);
+  };
+
+  return (
+    <List
+      isLoading={!data && !error}
+      navigationTitle="Common Shortcuts"
+      searchBarPlaceholder="Search common shortcuts…"
+    >
+      {error ? (
+        <List.EmptyView icon={Icon.ExclamationMark} title="Unable to Read Active Shortcuts" description={error} />
+      ) : null}
+      {!error && data && favorites.length === 0 ? (
+        <List.EmptyView
+          icon={Icon.Keyboard}
+          title="Choose Your Common Shortcuts"
+          description="Only shortcuts from the active AeroSpace configuration can be added."
+          actions={
+            <ActionPanel>
+              <Action title="Manage Common Shortcuts" icon={Icon.CheckList} onAction={manage} />
+              {data.configPath ? (
+                <Action.Open title="Edit AeroSpace Config" target={data.configPath} icon={Icon.Document} />
+              ) : null}
+            </ActionPanel>
+          }
+        />
+      ) : null}
+      {favorites.length ? (
+        <List.Section title="Common Shortcuts" subtitle={`${favorites.length} from active config`}>
+          {favorites.map((shortcut) => (
+            <List.Item
+              key={shortcut.id}
+              icon={coloredIcon(categoryIcon(shortcut), PALETTE.secondary)}
+              title={shortcut.description}
+              subtitle={shortcut.command}
+              accessories={[{ text: shortcut.keyDisplay, icon: Icon.CommandSymbol }]}
+              actions={
+                <ShortcutActions
+                  shortcut={shortcut}
+                  configPath={data?.configPath ?? null}
+                  isFavorite
+                  onToggleFavorite={async () => {
+                    const next = (data?.favoriteIds ?? []).filter((id) => id !== shortcut.id);
+                    await LocalStorage.setItem(FAVORITE_SHORTCUTS_KEY, JSON.stringify(next));
+                    updateFavorites(next);
+                  }}
+                  onManage={manage}
+                  onRefresh={refresh}
+                />
+              }
+            />
+          ))}
+        </List.Section>
+      ) : null}
+    </List>
+  );
+}
+
+export default function Command() {
+  return <CommonShortcuts />;
 }
